@@ -133,9 +133,33 @@ async def continue_as_guest(callback: CallbackQuery, state: FSMContext, api_clie
 
 
 @router.callback_query(F.data == "auth:login")
-async def start_login(callback: CallbackQuery, state: FSMContext):
+async def start_login(callback: CallbackQuery, state: FSMContext, storage: StorageInterface):
     """Start login flow."""
-    logger.info(f"User {callback.from_user.id} started login")
+    telegram_id = callback.from_user.id
+    logger.info(f"User {telegram_id} started login")
+    
+    # Check if user already has credentials stored (already logged in)
+    is_logged_in = await storage.is_user_logged_in(telegram_id)
+    if is_logged_in:
+        logger.info(f"✅ User {telegram_id} already has credentials stored")
+        credentials = await storage.get_user_credentials(telegram_id)
+        await callback.answer("ℹ️ You are already logged in!", show_alert=True)
+        
+        # Use inline keyboard to allow switching accounts
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Login with Another Account", callback_data="auth:login_switch")],
+            [InlineKeyboardButton(text="❌ Cancel", callback_data="auth:cancel")]
+        ])
+        
+        await callback.message.edit_text(
+            "✅ You are already logged in!\n\n"
+            f"Email: {credentials.get('email', 'Unknown')}\n\n"
+            "Do you want to logout and login with another account?",
+            reply_markup=keyboard
+        )
+        return
+    
     await callback.answer()
     await state.set_state(LoginStates.waiting_for_username)
     await callback.message.edit_text(
@@ -198,6 +222,9 @@ async def process_login_password(message: Message, state: FSMContext, api_client
     logger.info(f"🔄 Processing login for user {telegram_id} with username {data.get('username')}")
     
     try:
+        # Show processing message
+        processing_msg = await message.answer("⏳ Logging in, please wait...")
+        
         # Login to backend
         logger.info(f"🔄 Calling /auth/login API for user {telegram_id}")
         login_response = await api_client.login(
@@ -217,6 +244,9 @@ async def process_login_password(message: Message, state: FSMContext, api_client
         
         logger.info(f"📋 Got user ID {user_id} from login response")
         
+        # Update processing message
+        await processing_msg.edit_text("⏳ Loading your profile...")
+        
         # Get player by user ID to get playerUuid
         try:
             logger.info(f"🔄 Calling /players/user/{user_id} API")
@@ -235,6 +265,13 @@ async def process_login_password(message: Message, state: FSMContext, api_client
                 await player_service.set_language(telegram_id, language_code)
             
             logger.info(f"🎉 Login complete for user {telegram_id}")
+            
+            # Store credentials locally so user doesn't need to login again
+            await storage.set_user_credentials(telegram_id, data["username"], password)
+            logger.info(f"💾 Stored credentials for user {telegram_id}")
+            
+            # Delete processing message and show success
+            await processing_msg.delete()
             await message.answer(
                 "✅ Login successful! Welcome back to Betting Payment Manager!"
             )
@@ -248,6 +285,10 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             logger.error(f"❌ Error getting player after login: {e}", exc_info=True)
             logger.error(f"   Error type: {type(e).__name__}")
             logger.error(f"   Error details: {str(e)}")
+            
+            # Delete processing message
+            await processing_msg.delete()
+            
             await message.answer(
                 "⚠️ Login successful, but player profile not found.\n\n"
                 "You can continue as guest. To link your account, please register first."
@@ -267,6 +308,12 @@ async def process_login_password(message: Message, state: FSMContext, api_client
     except Exception as e:
         logger.error(f"❌ Login API error for user {telegram_id}: {e}", exc_info=True)
         logger.error(f"   Error type: {type(e).__name__}")
+        
+        # Delete processing message
+        try:
+            await processing_msg.delete()
+        except:
+            pass
         
         # Parse error message
         error_msg = "❌ Login failed. "
@@ -294,6 +341,47 @@ async def process_login_password(message: Message, state: FSMContext, api_client
         await message.answer(error_msg)
         await state.clear()
         await message.answer("Please try /start again to login or register.")
+
+
+@router.callback_query(F.data == "auth:login_switch")
+async def switch_login_account(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Logout and start login with another account."""
+    telegram_id = callback.from_user.id
+    logger.info(f"User {telegram_id} wants to switch account")
+    
+    await callback.answer()
+    
+    # Logout from API
+    try:
+        logger.info(f"🔄 Calling /auth/logout API for user {telegram_id}")
+        await api_client.logout()
+        logger.info(f"✅ Logout API success for user {telegram_id}")
+    except Exception as e:
+        logger.warning(f"⚠️ Logout API error (may be fine if already logged out): {e}")
+    
+    # Clear stored credentials
+    await storage.clear_user_credentials(telegram_id)
+    logger.info(f"🗑️ Cleared credentials for user {telegram_id}")
+    
+    await state.clear()
+    
+    await callback.message.edit_text(
+        "🔄 Switching account...\n\n"
+        "Please enter your email address:"
+    )
+    
+    # Start login flow
+    await state.set_state(LoginStates.waiting_for_username)
+
+
+@router.callback_query(F.data == "auth:cancel")
+async def cancel_login_switch(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Cancel login switch and show main menu."""
+    await callback.answer()
+    await state.clear()
+    
+    from app.handlers.main_menu import show_main_menu
+    await show_main_menu(callback.message, state, api_client, storage)
 
 
 @router.callback_query(F.data == "auth:register")
@@ -356,26 +444,32 @@ async def process_display_name(message: Message, state: FSMContext):
     logger.info(f"✅ Valid display name for user {message.from_user.id}, requesting phone")
     await state.update_data(display_name=display_name)
     await state.set_state(RegistrationStates.waiting_for_phone)
-    await message.answer("📱 Please enter your phone number (optional, format: +1234567890) or send /skip:")
+    await message.answer("📱 Please enter your phone number (required, format: +1234567890):")
 
 
 @router.message(RegistrationStates.waiting_for_phone, F.text)
 async def process_phone(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Process phone input and complete registration."""
     logger.info(f"📱 User {message.from_user.id} processing phone number")
-    phone = None
-    if message.text and message.text.strip() != "/skip":
-        from app.utils.validators import validate_phone
-        phone_text = message.text.strip()
-        is_valid, error = validate_phone(phone_text)
-        if not is_valid:
-            logger.warning(f"❌ Invalid phone from user {message.from_user.id}: {error}")
-            await message.answer(f"❌ {error}. Please try again or send /skip:")
-            return
-        phone = phone_text
-        logger.info(f"✅ Valid phone for user {message.from_user.id}")
-    else:
-        logger.info(f"⏭️ User {message.from_user.id} skipped phone number")
+    
+    # Phone is now REQUIRED - validate it
+    from app.utils.validators import validate_phone
+    phone_text = message.text.strip()
+    
+    # Don't allow /skip for phone anymore
+    if phone_text == "/skip":
+        logger.warning(f"❌ User {message.from_user.id} tried to skip phone (not allowed)")
+        await message.answer("❌ Phone number is required for registration. Please enter your phone number (format: +1234567890):")
+        return
+    
+    is_valid, error = validate_phone(phone_text)
+    if not is_valid:
+        logger.warning(f"❌ Invalid phone from user {message.from_user.id}: {error}")
+        await message.answer(f"❌ {error}. Please enter a valid phone number (format: +1234567890):")
+        return
+    
+    phone = phone_text
+    logger.info(f"✅ Valid phone for user {message.from_user.id}: {phone}")
     
     data = await state.get_data()
     telegram_id = message.from_user.id
@@ -384,9 +478,12 @@ async def process_phone(message: Message, state: FSMContext, api_client: APIClie
     logger.info(f"📊 Registration data for user {telegram_id}:")
     logger.info(f"   Email/Username: {data.get('email')}")
     logger.info(f"   Display Name: {data.get('display_name')}")
-    logger.info(f"   Phone: {phone or 'None'}")
+    logger.info(f"   Phone: {phone}")  # Phone is now always present (required)
     
     try:
+        # Show processing message
+        processing_msg = await message.answer("⏳ Creating your account, please wait...")
+        
         player_service = PlayerService(api_client, storage)
         language_code = await player_service.get_language(telegram_id) or "en"
         
@@ -403,6 +500,9 @@ async def process_phone(message: Message, state: FSMContext, api_client: APIClie
         )
         
         logger.info(f"✅ Registration successful for user {telegram_id}, playerUuid: {player_uuid}")
+        
+        # Delete processing message and show success
+        await processing_msg.delete()
         await message.answer("✅ Registration successful! Welcome to Betting Payment Manager!")
         await state.clear()
         
@@ -412,14 +512,35 @@ async def process_phone(message: Message, state: FSMContext, api_client: APIClie
         
     except Exception as e:
         logger.error(f"❌ Registration error for user {telegram_id}: {e}", exc_info=True)
-        await message.answer("❌ Registration failed. Please try again or contact support.")
+        
+        # Delete processing message
+        try:
+            await processing_msg.delete()
+        except:
+            pass
+        
+        # Parse error message
+        error_msg = "❌ Registration failed. "
+        error_str = str(e).lower()
+        
+        if "already exists" in error_str or "409" in error_str:
+            error_msg += "This email is already registered. Try logging in instead."
+        elif "400" in error_str or "validation" in error_str:
+            error_msg += "Invalid input format."
+        else:
+            error_msg += "Please try again or contact support."
+        
+        await message.answer(error_msg)
         await state.clear()
 
 
 @router.message(F.text == "/skip")
 async def skip_phone(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Skip phone number input."""
+    """Handle /skip command - phone is now required, so this will show an error."""
     logger.info(f"⏭️ User {message.from_user.id} used /skip command in state {await state.get_state()}")
-    if await state.get_state() == RegistrationStates.waiting_for_phone:
-        await process_phone(message, state, api_client, storage)
+    current_state = await state.get_state()
+    
+    if current_state == RegistrationStates.waiting_for_phone:
+        logger.warning(f"❌ User {message.from_user.id} tried to skip phone (required)")
+        await message.answer("❌ Phone number is required for registration. Please enter your phone number (format: +1234567890):")
 

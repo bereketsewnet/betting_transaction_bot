@@ -53,6 +53,26 @@ class StorageInterface(ABC):
         pass
     
     @abstractmethod
+    async def set_user_credentials(self, telegram_id: int, email: str, password: str) -> None:
+        """Store user credentials locally."""
+        pass
+    
+    @abstractmethod
+    async def get_user_credentials(self, telegram_id: int) -> Optional[Dict[str, str]]:
+        """Get stored user credentials."""
+        pass
+    
+    @abstractmethod
+    async def is_user_logged_in(self, telegram_id: int) -> bool:
+        """Check if user has stored credentials (is logged in)."""
+        pass
+    
+    @abstractmethod
+    async def clear_user_credentials(self, telegram_id: int) -> None:
+        """Clear stored user credentials (logout)."""
+        pass
+    
+    @abstractmethod
     async def close(self) -> None:
         """Close storage connection."""
         pass

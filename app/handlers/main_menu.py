@@ -20,7 +20,11 @@ async def show_main_menu(message: Message, state: FSMContext, api_client: APICli
     """Show main menu."""
     await state.clear()
     
-    keyboard = build_main_menu_keyboard()
+    # Check if user is logged in (has credentials) to show logout button
+    telegram_id = message.from_user.id
+    is_logged_in = await storage.is_user_logged_in(telegram_id)
+    
+    keyboard = build_main_menu_keyboard(show_logout=is_logged_in)
     await message.answer(
         "🏠 Main Menu\n\n"
         "Select an option:",
@@ -93,6 +97,7 @@ async def cmd_help(message: Message):
 Available commands:
 • /start - Start the bot
 • /menu - Show main menu
+• /logout - Logout from your account
 • /help - Show this help message
 
 Main features:
@@ -100,8 +105,63 @@ Main features:
 • 💸 Withdraw - Make a withdrawal transaction
 • 📜 History - View your transaction history
 • 🌐 Open Web App - Access full web interface
+• 🚪 Logout - Logout and login with another account
 
 For support, please contact the administrator.
     """
     await message.answer(help_text)
+
+
+@router.message(F.text == "🚪 Logout")
+@router.message(F.text == "/logout")
+async def cmd_logout(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Handle logout command."""
+    telegram_id = message.from_user.id
+    logger.info(f"User {telegram_id} requested logout")
+    
+    # Check if user has credentials stored
+    is_logged_in = await storage.is_user_logged_in(telegram_id)
+    if not is_logged_in:
+        await message.answer("ℹ️ You are not logged in. Nothing to logout.")
+        return
+    
+    try:
+        # Call API logout endpoint
+        logger.info(f"🔄 Calling /auth/logout API for user {telegram_id}")
+        try:
+            await api_client.logout()
+            logger.info(f"✅ Logout API success for user {telegram_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ Logout API error (may be fine if already logged out): {e}")
+        
+        # Clear stored credentials
+        await storage.clear_user_credentials(telegram_id)
+        logger.info(f"🗑️ Cleared credentials for user {telegram_id}")
+        
+        # Clear player UUID if needed (optional, but keeps data clean)
+        # await storage.set_player_uuid(telegram_id, None)  # Uncomment if you want to clear UUID too
+        
+        await state.clear()
+        await message.answer(
+            "✅ Logout successful!\n\n"
+            "You can now:\n"
+            "• /start - Login with another account\n"
+            "• Continue as guest"
+        )
+        
+        # Show welcome/start options
+        from app.handlers.start import cmd_start
+        await cmd_start(message, state, api_client, storage)
+        
+    except Exception as e:
+        logger.error(f"❌ Logout error for user {telegram_id}: {e}", exc_info=True)
+        # Even if API fails, clear local credentials
+        try:
+            await storage.clear_user_credentials(telegram_id)
+            await message.answer(
+                "✅ Logged out locally.\n\n"
+                "Note: Backend logout may have failed, but you can still login with another account."
+            )
+        except:
+            await message.answer("❌ Logout failed. Please try again or contact support.")
 

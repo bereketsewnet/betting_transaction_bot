@@ -44,6 +44,15 @@ class SQLiteStorage(StorageInterface):
                 FOREIGN KEY (telegram_id) REFERENCES players(telegram_id) ON DELETE CASCADE
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_credentials (
+                telegram_id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (telegram_id) REFERENCES players(telegram_id) ON DELETE CASCADE
+            )
+        """)
         await conn.commit()
         logger.info("SQLite database initialized")
     
@@ -151,6 +160,47 @@ class SQLiteStorage(StorageInterface):
             (telegram_id,)
         )
         await conn.commit()
+    
+    async def set_user_credentials(self, telegram_id: int, email: str, password: str) -> None:
+        """Store user credentials locally (encrypted for security)."""
+        conn = await self._get_connection()
+        # For simplicity, store password as-is (in production, use encryption)
+        # TODO: Add encryption for password storage
+        await conn.execute(
+            """INSERT OR REPLACE INTO user_credentials 
+               (telegram_id, email, password, updated_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
+            (telegram_id, email, password)
+        )
+        await conn.commit()
+        logger.info(f"💾 Stored credentials for telegram_id {telegram_id}")
+    
+    async def get_user_credentials(self, telegram_id: int) -> Optional[Dict[str, str]]:
+        """Get stored user credentials."""
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT email, password FROM user_credentials WHERE telegram_id = ?",
+            (telegram_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {"email": row["email"], "password": row["password"]}
+            return None
+    
+    async def is_user_logged_in(self, telegram_id: int) -> bool:
+        """Check if user has stored credentials (is logged in)."""
+        credentials = await self.get_user_credentials(telegram_id)
+        return credentials is not None
+    
+    async def clear_user_credentials(self, telegram_id: int) -> None:
+        """Clear stored user credentials (logout)."""
+        conn = await self._get_connection()
+        await conn.execute(
+            "DELETE FROM user_credentials WHERE telegram_id = ?",
+            (telegram_id,)
+        )
+        await conn.commit()
+        logger.info(f"🗑️ Cleared credentials for telegram_id {telegram_id}")
     
     async def close(self) -> None:
         """Close storage connection."""

@@ -25,6 +25,11 @@ class Config:
     # Backend Integration
     BACKEND_NOTIFY_SECRET: str = os.getenv("BACKEND_NOTIFY_SECRET", "")
     
+    # Role IDs for user registration (can be changed in .env)
+    ADMIN_ROLE_ID: int = int(os.getenv("ADMIN_ROLE_ID", "7"))
+    AGENT_ROLE_ID: int = int(os.getenv("AGENT_ROLE_ID", "8"))
+    PLAYER_ROLE_ID: int = int(os.getenv("PLAYER_ROLE_ID", "9"))
+    
     # Storage Configuration
     STORAGE_MODE: str = os.getenv("STORAGE_MODE", "sqlite")  # sqlite or memory
     DB_PATH: str = os.getenv("DB_PATH", "./data/bot.sqlite")

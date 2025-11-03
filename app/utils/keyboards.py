@@ -67,7 +67,7 @@ def build_paginated_inline_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard), total_pages
 
 
-def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
+def build_main_menu_keyboard(show_logout: bool = False) -> ReplyKeyboardMarkup:
     """Build main menu reply keyboard."""
     keyboard = [
         [KeyboardButton(text="💵 Deposit")],
@@ -76,6 +76,8 @@ def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🌐 Open Web App")],
         [KeyboardButton(text="ℹ️ Help")],
     ]
+    if show_logout:
+        keyboard.append([KeyboardButton(text="🚪 Logout")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 

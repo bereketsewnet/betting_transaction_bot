@@ -14,7 +14,6 @@ from app.logger import logger
 from app.storage import get_storage
 from app.services.api_client import APIClient
 from app.services.notify_service import NotifyService
-from app.middlewares.throttling import ThrottlingMiddleware
 from app.middlewares.error_handler import ErrorHandlerMiddleware, error_handler
 
 # Import handlers
@@ -113,8 +112,7 @@ async def polling_mode():
     dp.callback_query.middleware(inject_dependencies)
     
     # Register other middlewares AFTER dependency injection
-    dp.message.middleware(ThrottlingMiddleware(rate_limit=8.0))
-    dp.callback_query.middleware(ThrottlingMiddleware(rate_limit=8.0))
+    # NO throttling - let users interact naturally
     dp.update.middleware(ErrorHandlerMiddleware())
     dp.errors.register(error_handler)
     
@@ -171,8 +169,7 @@ async def webhook_mode():
     dp.callback_query.middleware(inject_dependencies)
     
     # Register other middlewares AFTER dependency injection
-    dp.message.middleware(ThrottlingMiddleware(rate_limit=8.0))
-    dp.callback_query.middleware(ThrottlingMiddleware(rate_limit=8.0))
+    # NO throttling - let users interact naturally
     dp.update.middleware(ErrorHandlerMiddleware())
     dp.errors.register(error_handler)
     

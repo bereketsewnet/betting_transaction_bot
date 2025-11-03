@@ -10,6 +10,7 @@ class MemoryStorage(StorageInterface):
     def __init__(self):
         self._players: Dict[int, Dict[str, Any]] = {}
         self._state_data: Dict[int, Dict[str, Any]] = {}
+        self._credentials: Dict[int, Dict[str, str]] = {}
         logger.warning("Using memory storage - data will be lost on restart!")
     
     async def get_player_uuid(self, telegram_id: int) -> Optional[str]:
@@ -55,9 +56,28 @@ class MemoryStorage(StorageInterface):
         """Clear all state data for a user."""
         self._state_data.pop(telegram_id, None)
     
+    async def set_user_credentials(self, telegram_id: int, email: str, password: str) -> None:
+        """Store user credentials locally."""
+        self._credentials[telegram_id] = {"email": email, "password": password}
+        logger.info(f"💾 Stored credentials for telegram_id {telegram_id}")
+    
+    async def get_user_credentials(self, telegram_id: int) -> Optional[Dict[str, str]]:
+        """Get stored user credentials."""
+        return self._credentials.get(telegram_id)
+    
+    async def is_user_logged_in(self, telegram_id: int) -> bool:
+        """Check if user has stored credentials (is logged in)."""
+        return telegram_id in self._credentials
+    
+    async def clear_user_credentials(self, telegram_id: int) -> None:
+        """Clear stored user credentials (logout)."""
+        self._credentials.pop(telegram_id, None)
+        logger.info(f"🗑️ Cleared credentials for telegram_id {telegram_id}")
+    
     async def close(self) -> None:
         """Close storage connection."""
         self._players.clear()
         self._state_data.clear()
+        self._credentials.clear()
         logger.info("Memory storage cleared")
 

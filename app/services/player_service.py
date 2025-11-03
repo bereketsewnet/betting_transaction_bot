@@ -60,7 +60,7 @@ class PlayerService:
                 telegram_id=str(telegram_id),
                 telegram_username=telegram_username,
                 language_code=language_code,
-                username=username,
+                username=email,  # Email is used as username
                 email=email,
                 password=password,
                 display_name=display_name,
@@ -69,7 +69,11 @@ class PlayerService:
             player_uuid = response.player.playerUuid
             await self.storage.set_player_uuid(telegram_id, player_uuid)
             await self.storage.set_language(telegram_id, language_code)
-            logger.info(f"Registered player {player_uuid} for telegram_id {telegram_id}")
+            
+            # Store credentials locally so user doesn't need to login again
+            await self.storage.set_user_credentials(telegram_id, email, password)
+            
+            logger.info(f"✅ Registered player {player_uuid} for telegram_id {telegram_id} and stored credentials")
             return player_uuid
         except Exception as e:
             logger.error(f"Failed to register player: {e}")

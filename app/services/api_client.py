@@ -138,6 +138,11 @@ class APIClient:
         response = await self._request("POST", "auth/login", json_data=payload)
         return response.json()
     
+    async def logout(self) -> Dict[str, Any]:
+        """Logout user."""
+        response = await self._request("POST", "auth/logout", json_data={})
+        return response.json()
+    
     async def get_player_by_user_id(self, user_id: int) -> PlayerResponse:
         """Get player by user ID (after login)."""
         response = await self._request("GET", f"players/user/{user_id}")
@@ -171,19 +176,26 @@ class APIClient:
         display_name: str,
         phone: Optional[str] = None,
     ) -> PlayerResponse:
-        """Register player with full account."""
+        """Register player with full account using /players/register endpoint."""
+        # Build payload for /players/register endpoint
         payload = {
-            "telegramId": telegram_id,
-            "telegramUsername": telegram_username,
-            "languageCode": language_code,
-            "username": username,
+            "username": email,  # Email is used as username
             "email": email,
             "password": password,
             "displayName": display_name,
-            "phone": phone,
+            "languageCode": language_code,
         }
+        if phone:
+            payload["phone"] = phone
+        
+        logger.info(f"🔄 Registering player: email={email}, languageCode={language_code}")
+        
+        # Register player via /players/register
         response = await self._request("POST", "players/register", json_data=payload)
-        return PlayerResponse(**response.json())
+        player_data = response.json()
+        logger.info(f"✅ Player registered: {player_data.get('player', {}).get('playerUuid')}")
+        
+        return PlayerResponse(**player_data)
     
     async def get_player(self, player_uuid: str) -> PlayerResponse:
         """Get player by UUID."""
