@@ -39,10 +39,20 @@ async def start_deposit_flow(message: Message, state: FSMContext, api_client: AP
     """Start deposit flow."""
     try:
         # Get deposit banks
+        logger.info(f"🔄 Fetching deposit banks for user {message.from_user.id}")
         banks = await api_client.get_deposit_banks()
+        logger.info(f"📊 Received {len(banks)} deposit banks from API")
+        
         active_banks = [bank for bank in banks if bank.isActive]
+        logger.info(f"✅ Found {len(active_banks)} active deposit banks")
+        
+        # If no active banks but we have banks, show all banks
+        if not active_banks and banks:
+            logger.warning(f"⚠️ No active banks found, but {len(banks)} total banks. Showing all banks.")
+            active_banks = banks
         
         if not active_banks:
+            logger.error(f"❌ No deposit banks available for user {message.from_user.id}")
             await message.answer("❌ No deposit banks available. Please contact support.")
             return
         
@@ -96,43 +106,69 @@ async def select_deposit_bank(callback: CallbackQuery, state: FSMContext, api_cl
 
 
 @router.callback_query(F.data.startswith("amount:"), DepositStates.entering_amount)
-async def select_amount(callback: CallbackQuery, state: FSMContext):
+async def select_amount(callback: CallbackQuery, state: FSMContext, api_client: APIClient):
     """Handle amount selection."""
     await callback.answer()
     
     amount_data = callback.data.split(":", 1)[1]
     
     if amount_data == "custom":
+        # Get bank details from state to show them again
+        data = await state.get_data()
+        bank = data.get("bank", {})
+        
+        # Format bank details
+        from app.utils.text_templates import TextTemplates
+        templates = TextTemplates(api_client)
+        bank_details = templates.format_bank_details(bank)
+        
         await state.set_state(DepositStates.entering_amount)
         await callback.message.edit_text(
-            "Enter custom amount (e.g., 150.50):",
+            f"{bank_details}\n\n"
+            f"Enter custom amount (e.g., 150.50):",
             reply_markup=build_back_keyboard()
         )
     else:
         try:
             amount = float(amount_data)
             await state.update_data(amount=amount)
-            await proceed_to_betting_site(callback.message, state)
+            await proceed_to_betting_site(callback.message, state, api_client)
         except ValueError:
             await callback.message.edit_text("❌ Invalid amount. Please try again.")
 
 
 @router.message(DepositStates.entering_amount, F.text)
-async def process_amount(message: Message, state: FSMContext):
+async def process_amount(message: Message, state: FSMContext, api_client: APIClient):
     """Process custom amount input."""
+    # Get bank details from state to show them
+    data = await state.get_data()
+    bank = data.get("bank", {})
+    
+    # Format bank details
+    from app.utils.text_templates import TextTemplates
+    templates = TextTemplates(api_client)
+    bank_details = templates.format_bank_details(bank)
+    
     is_valid, amount, error = validate_amount(message.text)
     
     if not is_valid:
-        await message.answer(f"❌ {error}. Please try again:")
+        await message.answer(
+            f"{bank_details}\n\n"
+            f"❌ {error}. Please try again:"
+        )
         return
     
     await state.update_data(amount=amount)
-    await proceed_to_betting_site(message, state)
+    await proceed_to_betting_site(message, state, api_client)
 
 
 async def proceed_to_betting_site(message_or_callback, state: FSMContext, api_client: APIClient):
     """Proceed to betting site selection."""
     try:
+        # Get amount from state
+        data = await state.get_data()
+        amount = data.get("amount", 0)
+        
         betting_sites = await api_client.get_betting_sites(is_active=True)
         
         if not betting_sites:
@@ -146,12 +182,14 @@ async def proceed_to_betting_site(message_or_callback, state: FSMContext, api_cl
         
         if isinstance(message_or_callback, Message):
             await message_or_callback.answer(
-                "Select a betting site:",
+                f"✅ Amount: ETB {amount:.2f}\n\n"
+                f"Select a betting site:",
                 reply_markup=keyboard
             )
         else:
             await message_or_callback.message.edit_text(
-                "Select a betting site:",
+                f"✅ Amount: ETB {amount:.2f}\n\n"
+                f"Select a betting site:",
                 reply_markup=keyboard
             )
     except Exception as e:

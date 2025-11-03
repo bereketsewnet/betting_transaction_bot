@@ -1,6 +1,6 @@
 """Pydantic models matching API request/response formats."""
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Union
+from pydantic import BaseModel, Field, field_validator
 
 
 class Language(BaseModel):
@@ -23,7 +23,7 @@ class DepositBank(BaseModel):
     accountNumber: str
     accountName: str
     notes: Optional[str] = None
-    isActive: bool
+    isActive: bool = True  # Default to True if not provided
 
 
 class RequiredField(BaseModel):
@@ -38,9 +38,9 @@ class WithdrawalBank(BaseModel):
     """Withdrawal bank model."""
     id: int
     bankName: str
-    requiredFields: List[RequiredField]
+    requiredFields: Optional[List[RequiredField]] = []
     notes: Optional[str] = None
-    isActive: bool
+    isActive: bool = True  # Default to True if not provided
 
 
 class BettingSite(BaseModel):
@@ -106,7 +106,7 @@ class Transaction(BaseModel):
     id: int
     transactionUuid: str
     type: str
-    amount: str
+    amount: Union[str, int, float]  # Accept int, float, or str
     currency: str
     status: str
     depositBank: Optional[DepositBank] = None
@@ -118,6 +118,14 @@ class Transaction(BaseModel):
     requestedAt: Optional[str] = None
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
+    
+    @field_validator('amount', mode='before')
+    @classmethod
+    def convert_amount_to_string(cls, v):
+        """Convert amount to string if it's int or float."""
+        if isinstance(v, (int, float)):
+            return str(v)
+        return v
 
 
 class TransactionResponse(BaseModel):

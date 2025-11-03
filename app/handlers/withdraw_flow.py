@@ -40,10 +40,20 @@ async def start_withdraw_flow(message: Message, state: FSMContext, api_client: A
     """Start withdraw flow."""
     try:
         # Get withdrawal banks
+        logger.info(f"🔄 Fetching withdrawal banks for user {message.from_user.id}")
         banks = await api_client.get_withdrawal_banks()
+        logger.info(f"📊 Received {len(banks)} withdrawal banks from API")
+        
         active_banks = [bank for bank in banks if bank.isActive]
+        logger.info(f"✅ Found {len(active_banks)} active withdrawal banks")
+        
+        # If no active banks but we have banks, show all banks
+        if not active_banks and banks:
+            logger.warning(f"⚠️ No active banks found, but {len(banks)} total banks. Showing all banks.")
+            active_banks = banks
         
         if not active_banks:
+            logger.error(f"❌ No withdrawal banks available for user {message.from_user.id}")
             await message.answer("❌ No withdrawal banks available. Please contact support.")
             return
         

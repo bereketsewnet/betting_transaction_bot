@@ -54,17 +54,14 @@ class TextTemplates:
     def format_bank_details(bank: dict) -> str:
         """Format bank details for display."""
         lines = [
-            f"🏦 {bank.get('bankName', 'Bank')}",
-            f"Account: {bank.get('accountName', 'N/A')}",
+            "Bank Details:",
+            f"Bank: {bank.get('bankName', 'N/A')}",
+            f"Account Name: {bank.get('accountName', 'N/A')}",
+            f"Account Number: {bank.get('accountNumber', 'N/A')}",
         ]
         
-        if bank.get('accountNumber'):
-            from app.utils.validators import mask_account_number
-            masked = mask_account_number(bank['accountNumber'])
-            lines.append(f"Account Number: {masked}")
-        
         if bank.get('notes'):
-            lines.append(f"Notes: {bank['notes']}")
+            lines.append(f"Notes: {bank.get('notes', 'N/A')}")
         
         return "\n".join(lines)
     

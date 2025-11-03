@@ -112,13 +112,72 @@ class APIClient:
         """Get deposit banks."""
         response = await self._request("GET", "config/deposit-banks")
         data = response.json()
-        return [DepositBank(**bank) for bank in data.get("depositBanks", [])]
+        logger.debug(f"📦 Deposit banks API response: {type(data)}")
+        
+        # Handle different response structures
+        banks_list = []
+        if isinstance(data, list):
+            # Direct array response
+            banks_list = data
+        elif isinstance(data, dict):
+            # Object with depositBanks key
+            banks_list = data.get("depositBanks", [])
+            # Also try "banks" or "data" keys as fallback
+            if not banks_list:
+                banks_list = data.get("banks", data.get("data", []))
+        
+        logger.info(f"📊 Found {len(banks_list)} deposit banks in response")
+        
+        # Parse banks with error handling
+        banks = []
+        for bank_data in banks_list:
+            try:
+                # Ensure isActive has a default
+                if "isActive" not in bank_data:
+                    bank_data["isActive"] = True
+                banks.append(DepositBank(**bank_data))
+            except Exception as e:
+                logger.warning(f"⚠️ Skipping invalid deposit bank data: {bank_data}, error: {e}")
+        
+        logger.info(f"✅ Parsed {len(banks)} valid deposit banks")
+        return banks
     
     async def get_withdrawal_banks(self) -> List[WithdrawalBank]:
         """Get withdrawal banks."""
         response = await self._request("GET", "config/withdrawal-banks")
         data = response.json()
-        return [WithdrawalBank(**bank) for bank in data.get("withdrawalBanks", [])]
+        logger.debug(f"📦 Withdrawal banks API response: {type(data)}")
+        
+        # Handle different response structures
+        banks_list = []
+        if isinstance(data, list):
+            # Direct array response
+            banks_list = data
+        elif isinstance(data, dict):
+            # Object with withdrawalBanks key
+            banks_list = data.get("withdrawalBanks", [])
+            # Also try "banks" or "data" keys as fallback
+            if not banks_list:
+                banks_list = data.get("banks", data.get("data", []))
+        
+        logger.info(f"📊 Found {len(banks_list)} withdrawal banks in response")
+        
+        # Parse banks with error handling
+        banks = []
+        for bank_data in banks_list:
+            try:
+                # Ensure isActive has a default
+                if "isActive" not in bank_data:
+                    bank_data["isActive"] = True
+                # Ensure requiredFields exists
+                if "requiredFields" not in bank_data:
+                    bank_data["requiredFields"] = []
+                banks.append(WithdrawalBank(**bank_data))
+            except Exception as e:
+                logger.warning(f"⚠️ Skipping invalid withdrawal bank data: {bank_data}, error: {e}")
+        
+        logger.info(f"✅ Parsed {len(banks)} valid withdrawal banks")
+        return banks
     
     async def get_betting_sites(self, is_active: bool = True) -> List[BettingSite]:
         """Get betting sites."""
