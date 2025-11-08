@@ -54,8 +54,14 @@ async def cmd_start(message: Message, state: FSMContext, api_client: APIClient, 
             reply_markup=keyboard
         )
     except Exception as e:
-        logger.error(f"Error in /start: {e}")
-        await message.answer("❌ An error occurred. Please try again later.")
+        logger.error(f"❌ Error in /start for user {message.from_user.id}: {e}", exc_info=True)
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Error details: {str(e)[:200]}")
+        await message.answer(
+            f"❌ An error occurred while starting the bot.\n\n"
+            f"Error: {type(e).__name__}\n"
+            f"Please try again or contact support."
+        )
 
 
 @router.callback_query(F.data.startswith("lang:"))
@@ -534,13 +540,9 @@ async def process_phone(message: Message, state: FSMContext, api_client: APIClie
         await state.clear()
 
 
-@router.message(F.text == "/skip")
+@router.message(RegistrationStates.waiting_for_phone, F.text == "/skip")
 async def skip_phone(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle /skip command - phone is now required, so this will show an error."""
-    logger.info(f"⏭️ User {message.from_user.id} used /skip command in state {await state.get_state()}")
-    current_state = await state.get_state()
-    
-    if current_state == RegistrationStates.waiting_for_phone:
-        logger.warning(f"❌ User {message.from_user.id} tried to skip phone (required)")
-        await message.answer("❌ Phone number is required for registration. Please enter your phone number (format: +1234567890):")
+    """Handle /skip command in registration - phone is now required, so this will show an error."""
+    logger.warning(f"❌ User {message.from_user.id} tried to skip phone (required) in registration")
+    await message.answer("❌ Phone number is required for registration. Please enter your phone number (format: +1234567890):")
 

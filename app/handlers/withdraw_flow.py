@@ -44,13 +44,9 @@ async def start_withdraw_flow(message: Message, state: FSMContext, api_client: A
         banks = await api_client.get_withdrawal_banks()
         logger.info(f"📊 Received {len(banks)} withdrawal banks from API")
         
+        # Filter to only show active banks (isActive = true)
         active_banks = [bank for bank in banks if bank.isActive]
-        logger.info(f"✅ Found {len(active_banks)} active withdrawal banks")
-        
-        # If no active banks but we have banks, show all banks
-        if not active_banks and banks:
-            logger.warning(f"⚠️ No active banks found, but {len(banks)} total banks. Showing all banks.")
-            active_banks = banks
+        logger.info(f"✅ Found {len(active_banks)} active withdrawal banks (filtered from {len(banks)} total)")
         
         if not active_banks:
             logger.error(f"❌ No withdrawal banks available for user {message.from_user.id}")
@@ -246,8 +242,8 @@ async def process_withdraw_player_site_id(message: Message, state: FSMContext):
     await state.set_state(WithdrawStates.uploading_screenshot)
     
     await message.answer(
-        "📸 Upload a screenshot (optional):\n\n"
-        "Send a photo or type /skip to continue without screenshot."
+        "📎 Add attachment (optional):\n\n"
+        "Send a photo or type /skip to continue without attachment."
     )
 
 
@@ -262,8 +258,18 @@ async def process_withdraw_screenshot(message: Message, state: FSMContext):
 @router.message(WithdrawStates.uploading_screenshot, F.text == "/skip")
 async def skip_withdraw_screenshot(message: Message, state: FSMContext):
     """Skip screenshot upload."""
+    logger.info(f"⏭️ User {message.from_user.id} skipping screenshot upload in withdrawal flow")
     await state.update_data(screenshot_file_id=None)
     await proceed_to_withdraw_confirmation(message, state)
+
+
+@router.message(WithdrawStates.uploading_screenshot, F.text)
+async def handle_text_instead_of_photo(message: Message, state: FSMContext):
+    """Handle text input when photo is expected."""
+    # User sent text instead of photo, remind them
+    await message.answer(
+        "📎 Please send a photo attachment or type /skip to continue without attachment."
+    )
 
 
 async def proceed_to_withdraw_confirmation(message: Message, state: FSMContext):

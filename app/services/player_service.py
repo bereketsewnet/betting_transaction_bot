@@ -29,9 +29,12 @@ class PlayerService:
         
         # Create new guest player
         try:
+            # Ensure telegram_username is a string (API requires string, not None)
+            telegram_username_str = telegram_username if telegram_username else ""
+            
             response: PlayerResponse = await self.api_client.create_player(
                 telegram_id=str(telegram_id),
-                telegram_username=telegram_username,
+                telegram_username=telegram_username_str,
                 language_code=language_code,
             )
             player_uuid = response.player.playerUuid

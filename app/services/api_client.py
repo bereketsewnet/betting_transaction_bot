@@ -132,9 +132,20 @@ class APIClient:
         banks = []
         for bank_data in banks_list:
             try:
+                # Fix API typo: bankNamee -> bankName (if present)
+                if "bankNamee" in bank_data and "bankName" not in bank_data:
+                    bank_data["bankName"] = bank_data.pop("bankNamee")
+                    logger.debug(f"   Fixed typo: bankNamee -> bankName")
+                
                 # Ensure isActive has a default
                 if "isActive" not in bank_data:
                     bank_data["isActive"] = True
+                
+                # Validate required fields
+                if "id" not in bank_data or "bankName" not in bank_data:
+                    logger.warning(f"⚠️ Skipping deposit bank with missing id or bankName: {bank_data}")
+                    continue
+                
                 banks.append(DepositBank(**bank_data))
             except Exception as e:
                 logger.warning(f"⚠️ Skipping invalid deposit bank data: {bank_data}, error: {e}")
@@ -166,12 +177,40 @@ class APIClient:
         banks = []
         for bank_data in banks_list:
             try:
+                # Fix API typo: bankNamee -> bankName
+                if "bankNamee" in bank_data and "bankName" not in bank_data:
+                    bank_data["bankName"] = bank_data.pop("bankNamee")
+                    logger.debug(f"   Fixed typo: bankNamee -> bankName")
+                
                 # Ensure isActive has a default
                 if "isActive" not in bank_data:
                     bank_data["isActive"] = True
-                # Ensure requiredFields exists
-                if "requiredFields" not in bank_data:
+                
+                # Parse requiredFields if it's a JSON string
+                if "requiredFields" in bank_data:
+                    required_fields = bank_data["requiredFields"]
+                    if isinstance(required_fields, str):
+                        # It's a JSON string, parse it
+                        import json
+                        try:
+                            bank_data["requiredFields"] = json.loads(required_fields)
+                            logger.debug(f"   Parsed requiredFields from JSON string to list: {len(bank_data['requiredFields'])} fields")
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"⚠️ Failed to parse requiredFields JSON: {e}")
+                            bank_data["requiredFields"] = []
+                    elif not isinstance(required_fields, list):
+                        logger.warning(f"⚠️ requiredFields is neither string nor list, setting to empty: {type(required_fields)}")
+                        bank_data["requiredFields"] = []
+                else:
+                    # Ensure requiredFields exists
                     bank_data["requiredFields"] = []
+                    logger.debug(f"   Added default requiredFields: []")
+                
+                # Validate required fields
+                if "id" not in bank_data or "bankName" not in bank_data:
+                    logger.warning(f"⚠️ Skipping bank with missing id or bankName: {bank_data}")
+                    continue
+                
                 banks.append(WithdrawalBank(**bank_data))
             except Exception as e:
                 logger.warning(f"⚠️ Skipping invalid withdrawal bank data: {bank_data}, error: {e}")
@@ -180,11 +219,21 @@ class APIClient:
         return banks
     
     async def get_betting_sites(self, is_active: bool = True) -> List[BettingSite]:
-        """Get betting sites."""
+        """Get betting sites. Only returns sites where isActive = true."""
         params = {"isActive": str(is_active).lower()} if is_active else {}
         response = await self._request("GET", "config/betting-sites", params=params)
         data = response.json()
-        return [BettingSite(**site) for site in data.get("bettingSites", [])]
+        
+        # Parse all sites first
+        all_sites = [BettingSite(**site) for site in data.get("bettingSites", [])]
+        
+        # Filter to only return active sites (client-side safety check)
+        if is_active:
+            active_sites = [site for site in all_sites if site.isActive]
+            logger.debug(f"📊 Filtered betting sites: {len(active_sites)} active from {len(all_sites)} total")
+            return active_sites
+        
+        return all_sites
     
     # Authentication endpoints
     
