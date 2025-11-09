@@ -57,7 +57,10 @@ class APIClient:
         if params:
             logger.debug(f"   Params: {params}")
         if json_data:
-            logger.debug(f"   JSON: {json_data}")
+            # Log request body but mask sensitive fields for security
+            safe_json = {k: (v if k != "password" else "***" * len(str(v))) for k, v in json_data.items()}
+            logger.debug(f"   JSON: {safe_json}")
+            logger.info(f"   Request body keys: {list(json_data.keys())}")
         
         try:
             response = await self.client.request(
@@ -243,8 +246,18 @@ class APIClient:
             "username": username,
             "password": password,
         }
-        response = await self._request("POST", "auth/login", json_data=payload)
-        return response.json()
+        logger.info(f"🔐 Login request payload: username='{username}', password_length={len(password)}")
+        logger.debug(f"   Full payload: {payload}")
+        try:
+            response = await self._request("POST", "auth/login", json_data=payload)
+            result = response.json()
+            logger.info(f"✅ Login response received: {list(result.keys())}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Login request failed: {e}")
+            logger.error(f"   Username: {username}")
+            logger.error(f"   Password length: {len(password)}")
+            raise
     
     async def logout(self) -> Dict[str, Any]:
         """Logout user."""

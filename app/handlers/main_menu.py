@@ -29,12 +29,32 @@ async def show_main_menu(message: Message, state: FSMContext, api_client: APICli
     player_service = PlayerService(api_client, storage)
     player_uuid = await player_service.get_player_uuid(telegram_id)
     
-    keyboard = build_main_menu_keyboard(show_logout=is_logged_in, player_uuid=player_uuid)
-    await message.answer(
-        "🏠 Main Menu\n\n"
-        "Select an option:",
-        reply_markup=keyboard
-    )
+    try:
+        keyboard = build_main_menu_keyboard(show_logout=is_logged_in, player_uuid=player_uuid)
+        await message.answer(
+            "🏠 Main Menu\n\n"
+            "Select an option:",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"❌ Error building main menu keyboard: {e}", exc_info=True)
+        # Fallback: show menu without web app button
+        from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+        fallback_keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="💵 Deposit")],
+                [KeyboardButton(text="💸 Withdraw")],
+                [KeyboardButton(text="📜 History")],
+                [KeyboardButton(text="🌐 Open in Browser")],
+                [KeyboardButton(text="ℹ️ Help")],
+            ] + ([[KeyboardButton(text="🚪 Logout")]] if is_logged_in else []),
+            resize_keyboard=True
+        )
+        await message.answer(
+            "🏠 Main Menu\n\n"
+            "Select an option:",
+            reply_markup=fallback_keyboard
+        )
 
 
 @router.message(F.text == "🏠 Main Menu")
@@ -129,14 +149,20 @@ async def cmd_history(message: Message, state: FSMContext, api_client: APIClient
 async def cmd_web_app(message: Message, api_client: APIClient, storage: StorageInterface):
     """Handle web app redirect to browser."""
     from app.services.player_service import PlayerService
-    from app.utils.keyboards import get_web_app_url
+    from app.utils.keyboards import get_browser_url
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
-    player_service = PlayerService(api_client, storage)
     telegram_id = message.from_user.id
-    player_uuid = await player_service.get_player_uuid(telegram_id)
+    user_role = await storage.get_user_role(telegram_id)
     
-    web_url = get_web_app_url(player_uuid)
+    # Get player UUID only if not admin/agent
+    player_uuid = None
+    if user_role not in ("admin", "agent"):
+        player_service = PlayerService(api_client, storage)
+        player_uuid = await player_service.get_player_uuid(telegram_id)
+    
+    # Get browser URL (different for player vs admin/agent)
+    web_url = get_browser_url(player_uuid=player_uuid, user_role=user_role)
     
     # Create inline keyboard with URL button (opens in browser)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[

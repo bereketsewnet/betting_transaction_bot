@@ -226,7 +226,17 @@ async def process_login_password(message: Message, state: FSMContext, api_client
         await state.clear()
         return
     
-    logger.info(f"🔄 Processing login for user {telegram_id} with username {data.get('username')}")
+    username = data.get("username", "").strip()
+    if not username:
+        logger.error(f"❌ Empty username in state data for user {telegram_id}")
+        await message.answer("❌ Username is missing. Please start again with /start")
+        await state.clear()
+        return
+    
+    logger.info(f"🔄 Processing login for user {telegram_id}")
+    logger.info(f"   Username: {username}")
+    logger.info(f"   Password length: {len(password)}")
+    logger.info(f"   Username type: {type(username)}, Password type: {type(password)}")
     
     try:
         # Show processing message
@@ -235,7 +245,7 @@ async def process_login_password(message: Message, state: FSMContext, api_client
         # Login to backend
         logger.info(f"🔄 Calling /auth/login API for user {telegram_id}")
         login_response = await api_client.login(
-            username=data["username"],
+            username=username,
             password=password,
         )
         logger.info(f"✅ Login API success for user {telegram_id}")
@@ -404,8 +414,15 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             await state.clear()
             
             # Show main menu
-            from app.handlers.main_menu import show_main_menu
-            await show_main_menu(message, state, api_client, storage)
+            try:
+                from app.handlers.main_menu import show_main_menu
+                await show_main_menu(message, state, api_client, storage)
+            except Exception as menu_error:
+                logger.error(f"❌ Error showing main menu: {menu_error}", exc_info=True)
+                # Show fallback menu
+                await message.answer("✅ Login successful! Welcome back to Betting Payment Manager!")
+                from app.handlers.main_menu import show_main_menu
+                await show_main_menu(message, state, api_client, storage)
             
         except Exception as e:
             logger.error(f"❌ Error getting player after login: {e}", exc_info=True)

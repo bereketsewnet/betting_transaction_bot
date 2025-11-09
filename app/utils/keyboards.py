@@ -69,11 +69,26 @@ def build_paginated_inline_keyboard(
 
 
 def get_web_app_url(player_uuid: Optional[str] = None) -> str:
-    """Get web app URL with optional player UUID parameter."""
-    base_url = config.WEB_APP_URL.rstrip('/')
+    """Get web app URL with optional player UUID parameter (for mini app)."""
+    # Use default if WEB_APP_URL is empty
+    base_url = config.WEB_APP_URL.strip() if config.WEB_APP_URL else "https://websites.com"
+    base_url = base_url.rstrip('/')
     if player_uuid:
         # Use path parameter: /player/{player_uuid}
         return f"{base_url}/player/{player_uuid}"
+    return base_url
+
+
+def get_browser_url(player_uuid: Optional[str] = None, user_role: Optional[str] = None) -> str:
+    """Get web app URL for browser (all roles use base URL only).
+    
+    - All users (Player/Admin/Agent): WEB_APP_URL (base URL only, no player ID)
+    """
+    # Use default if WEB_APP_URL is empty
+    base_url = config.WEB_APP_URL.strip() if config.WEB_APP_URL else "https://websites.com"
+    base_url = base_url.rstrip('/')
+    
+    # All roles get base URL only (no player ID)
     return base_url
 
 
@@ -82,14 +97,32 @@ def is_https_url(url: str) -> bool:
     return url.startswith('https://')
 
 
+def is_valid_web_app_url(url: str) -> bool:
+    """Check if URL is valid for Telegram Web Apps.
+    
+    Telegram Web Apps require:
+    - HTTPS (not HTTP)
+    - Not localhost (even with HTTPS, localhost is rejected)
+    - Valid domain
+    """
+    if not url.startswith('https://'):
+        return False
+    
+    # Telegram rejects localhost even with HTTPS
+    if 'localhost' in url.lower() or '127.0.0.1' in url:
+        return False
+    
+    return True
+
+
 def build_main_menu_keyboard(show_logout: bool = False, player_uuid: Optional[str] = None) -> ReplyKeyboardMarkup:
-    """Build main menu reply keyboard with mini app button (if HTTPS)."""
+    """Build main menu reply keyboard with mini app button (if valid URL)."""
     web_app_url = get_web_app_url(player_uuid)
     
-    # Check if URL is HTTPS (Telegram Web Apps require HTTPS)
-    can_use_mini_app = is_https_url(web_app_url)
+    # Check if URL is valid for Telegram Web Apps (HTTPS + not localhost)
+    can_use_mini_app = is_valid_web_app_url(web_app_url)
     
-    # Build first row: mini app button (if HTTPS) + Deposit
+    # Build first row: mini app button (if valid) + Deposit
     if can_use_mini_app:
         # Mini app button (web_app) - appears on left side
         mini_app_button = KeyboardButton(
@@ -98,7 +131,7 @@ def build_main_menu_keyboard(show_logout: bool = False, player_uuid: Optional[st
         )
         first_row = [mini_app_button, KeyboardButton(text="💵 Deposit")]
     else:
-        # Skip mini app button if not HTTPS, just show Deposit
+        # Skip mini app button if URL is invalid (HTTP or localhost), just show Deposit
         first_row = [KeyboardButton(text="💵 Deposit")]
     
     keyboard = [

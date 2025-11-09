@@ -28,7 +28,7 @@ async def show_admin_menu(message: Message, state: FSMContext, api_client: APICl
     await state.clear()
     
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-    from app.utils.keyboards import get_web_app_url, is_https_url
+    from app.utils.keyboards import get_web_app_url, is_valid_web_app_url
     
     # Get player UUID if available (admin might have a player profile)
     telegram_id = message.from_user.id
@@ -38,10 +38,10 @@ async def show_admin_menu(message: Message, state: FSMContext, api_client: APICl
     
     web_app_url = get_web_app_url(player_uuid)
     
-    # Check if URL is HTTPS (Telegram Web Apps require HTTPS)
-    can_use_mini_app = is_https_url(web_app_url)
+    # Check if URL is valid for Telegram Web Apps (HTTPS + not localhost)
+    can_use_mini_app = is_valid_web_app_url(web_app_url)
     
-    # Build first row: mini app button (if HTTPS) + All Transactions
+    # Build first row: mini app button (if valid) + All Transactions
     if can_use_mini_app:
         # Mini app button (web_app) - appears on left side
         mini_app_button = KeyboardButton(
@@ -50,7 +50,7 @@ async def show_admin_menu(message: Message, state: FSMContext, api_client: APICl
         )
         first_row = [mini_app_button, KeyboardButton(text="📋 All Transactions")]
     else:
-        # Skip mini app button if not HTTPS, just show All Transactions
+        # Skip mini app button if URL is invalid (HTTP or localhost), just show All Transactions
         first_row = [KeyboardButton(text="📋 All Transactions")]
     
     # Use reply keyboard for better UX (like main menu)
@@ -135,8 +135,7 @@ async def request_date_for_message(message: Message, state: FSMContext):
 @router.message(F.text == "🌐 Open in Browser")
 async def cmd_admin_web_app(message: Message, api_client: APIClient, storage: StorageInterface):
     """Handle web app redirect to browser for admin."""
-    from app.services.player_service import PlayerService
-    from app.utils.keyboards import get_web_app_url
+    from app.utils.keyboards import get_browser_url
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
     telegram_id = message.from_user.id
@@ -144,10 +143,8 @@ async def cmd_admin_web_app(message: Message, api_client: APIClient, storage: St
     if user_role != "admin":
         return  # Don't answer, let other handlers process it
     
-    player_service = PlayerService(api_client, storage)
-    player_uuid = await player_service.get_player_uuid(telegram_id)
-    
-    web_url = get_web_app_url(player_uuid)
+    # Admin gets base URL only (no player ID)
+    web_url = get_browser_url(player_uuid=None, user_role="admin")
     
     # Create inline keyboard with URL button (opens in browser)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
