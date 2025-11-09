@@ -73,6 +73,26 @@ class StorageInterface(ABC):
         pass
     
     @abstractmethod
+    async def set_admin_token(self, telegram_id: int, access_token: str, role: str) -> None:
+        """Store admin access token and role."""
+        pass
+    
+    @abstractmethod
+    async def get_admin_token(self, telegram_id: int) -> Optional[str]:
+        """Get admin access token."""
+        pass
+    
+    @abstractmethod
+    async def get_user_role(self, telegram_id: int) -> Optional[str]:
+        """Get user role (admin, agent, player)."""
+        pass
+    
+    @abstractmethod
+    async def clear_admin_token(self, telegram_id: int) -> None:
+        """Clear admin access token (logout)."""
+        pass
+    
+    @abstractmethod
     async def close(self) -> None:
         """Close storage connection."""
         pass

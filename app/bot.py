@@ -17,7 +17,7 @@ from app.services.notify_service import NotifyService
 from app.middlewares.error_handler import ErrorHandlerMiddleware, error_handler
 
 # Import handlers
-from app.handlers import start, main_menu, deposit_flow, withdraw_flow, history, inline_lists, callbacks
+from app.handlers import start, main_menu, deposit_flow, withdraw_flow, history, inline_lists, callbacks, admin_menu
 
 
 async def setup_handlers(dp: Dispatcher, api_client: APIClient, storage):
@@ -30,6 +30,7 @@ async def setup_handlers(dp: Dispatcher, api_client: APIClient, storage):
     dp.include_router(history.router)
     dp.include_router(inline_lists.router)
     dp.include_router(callbacks.router)
+    dp.include_router(admin_menu.router)
 
 
 async def on_startup(bot: Bot, api_client: APIClient, storage):

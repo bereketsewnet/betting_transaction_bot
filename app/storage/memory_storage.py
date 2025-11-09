@@ -74,6 +74,31 @@ class MemoryStorage(StorageInterface):
         self._credentials.pop(telegram_id, None)
         logger.info(f"🗑️ Cleared credentials for telegram_id {telegram_id}")
     
+    async def set_admin_token(self, telegram_id: int, access_token: str, role: str) -> None:
+        """Store admin access token and role."""
+        if telegram_id not in self._credentials:
+            self._credentials[telegram_id] = {}
+        self._credentials[telegram_id]["access_token"] = access_token
+        self._credentials[telegram_id]["role"] = role
+        logger.info(f"💾 Stored admin token for telegram_id {telegram_id}, role: {role}")
+    
+    async def get_admin_token(self, telegram_id: int) -> Optional[str]:
+        """Get admin access token."""
+        creds = self._credentials.get(telegram_id)
+        return creds.get("access_token") if creds else None
+    
+    async def get_user_role(self, telegram_id: int) -> Optional[str]:
+        """Get user role (admin, agent, player)."""
+        creds = self._credentials.get(telegram_id)
+        return creds.get("role") if creds else None
+    
+    async def clear_admin_token(self, telegram_id: int) -> None:
+        """Clear admin access token (logout)."""
+        if telegram_id in self._credentials:
+            self._credentials[telegram_id].pop("access_token", None)
+            self._credentials[telegram_id].pop("role", None)
+        logger.info(f"🗑️ Cleared admin token for telegram_id {telegram_id}")
+    
     async def close(self) -> None:
         """Close storage connection."""
         self._players.clear()

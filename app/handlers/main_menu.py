@@ -40,15 +40,32 @@ async def cmd_main_menu(message_or_callback, state: FSMContext, api_client: APIC
     if isinstance(message_or_callback, CallbackQuery):
         await message_or_callback.answer()
         message = message_or_callback.message
+        telegram_id = message_or_callback.from_user.id
     else:
         message = message_or_callback
+        telegram_id = message.from_user.id
     
-    await show_main_menu(message, state, api_client, storage)
+    # Check if user is admin - show admin menu instead
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role == "admin":
+        from app.handlers.admin_menu import show_admin_menu
+        await show_admin_menu(message, state, api_client, storage)
+    else:
+        await show_main_menu(message, state, api_client, storage)
 
 
 @router.message(F.text == "💵 Deposit")
 async def cmd_deposit(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle deposit command."""
+    # Check if user is admin - redirect to admin menu
+    telegram_id = message.from_user.id
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role == "admin":
+        from app.handlers.admin_menu import show_admin_menu
+        await message.answer("👑 You are logged in as admin. Use the Admin Panel to manage transactions.")
+        await show_admin_menu(message, state, api_client, storage)
+        return
+    
     from app.handlers.deposit_flow import start_deposit_flow
     await start_deposit_flow(message, state, api_client, storage)
 
@@ -56,6 +73,15 @@ async def cmd_deposit(message: Message, state: FSMContext, api_client: APIClient
 @router.message(F.text == "💸 Withdraw")
 async def cmd_withdraw(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle withdraw command."""
+    # Check if user is admin - redirect to admin menu
+    telegram_id = message.from_user.id
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role == "admin":
+        from app.handlers.admin_menu import show_admin_menu
+        await message.answer("👑 You are logged in as admin. Use the Admin Panel to manage transactions.")
+        await show_admin_menu(message, state, api_client, storage)
+        return
+    
     from app.handlers.withdraw_flow import start_withdraw_flow
     await start_withdraw_flow(message, state, api_client, storage)
 
@@ -63,6 +89,15 @@ async def cmd_withdraw(message: Message, state: FSMContext, api_client: APIClien
 @router.message(F.text == "📜 History")
 async def cmd_history(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle history command."""
+    # Check if user is admin - redirect to admin menu
+    telegram_id = message.from_user.id
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role == "admin":
+        from app.handlers.admin_menu import show_admin_menu
+        await message.answer("👑 You are logged in as admin. Use the Admin Panel to view all transactions.")
+        await show_admin_menu(message, state, api_client, storage)
+        return
+    
     from app.handlers.history import show_transaction_history
     await show_transaction_history(message, state, api_client, storage)
 
@@ -134,9 +169,10 @@ async def cmd_logout(message: Message, state: FSMContext, api_client: APIClient,
         except Exception as e:
             logger.warning(f"⚠️ Logout API error (may be fine if already logged out): {e}")
         
-        # Clear stored credentials
+        # Clear stored credentials and admin token
         await storage.clear_user_credentials(telegram_id)
-        logger.info(f"🗑️ Cleared credentials for user {telegram_id}")
+        await storage.clear_admin_token(telegram_id)  # Clear admin token if exists
+        logger.info(f"🗑️ Cleared credentials and admin token for user {telegram_id}")
         
         # Clear player UUID if needed (optional, but keeps data clean)
         # await storage.set_player_uuid(telegram_id, None)  # Uncomment if you want to clear UUID too
@@ -158,6 +194,7 @@ async def cmd_logout(message: Message, state: FSMContext, api_client: APIClient,
         # Even if API fails, clear local credentials
         try:
             await storage.clear_user_credentials(telegram_id)
+            await storage.clear_admin_token(telegram_id)  # Clear admin token if exists
             await message.answer(
                 "✅ Logged out locally.\n\n"
                 "Note: Backend logout may have failed, but you can still login with another account."

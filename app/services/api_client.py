@@ -423,4 +423,71 @@ class APIClient:
             )
             response.raise_for_status()
             return UploadResponse(**response.json())
+    
+    # Admin endpoints
+    
+    async def get_admin_transactions(
+        self,
+        access_token: str,
+        page: int = 1,
+        limit: int = 20,
+        status: Optional[str] = None,
+        transaction_type: Optional[str] = None,
+        agent_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Get all transactions (admin only)."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        params = {"page": page, "limit": limit}
+        if status:
+            params["status"] = status
+        if transaction_type:
+            params["type"] = transaction_type
+        if agent_id:
+            params["agent"] = agent_id
+        
+        response = await self._request("GET", "admin/transactions", params=params, headers=headers)
+        return response.json()
+    
+    async def assign_transaction_to_agent(
+        self,
+        access_token: str,
+        transaction_id: int,
+        agent_id: int,
+    ) -> Dict[str, Any]:
+        """Assign transaction to agent (admin only)."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        json_data = {"agentId": agent_id}
+        response = await self._request(
+            "PUT",
+            f"admin/transactions/{transaction_id}/assign",
+            json_data=json_data,
+            headers=headers,
+        )
+        return response.json()
+    
+    async def update_transaction_status(
+        self,
+        access_token: str,
+        transaction_id: int,
+        status: str,
+        admin_notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update transaction status (admin only)."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        json_data = {"status": status}
+        if admin_notes:
+            json_data["adminNotes"] = admin_notes
+        response = await self._request(
+            "PUT",
+            f"admin/transactions/{transaction_id}/status",
+            json_data=json_data,
+            headers=headers,
+        )
+        return response.json()
+    
+    async def get_agents(self, access_token: str) -> Dict[str, Any]:
+        """Get all agents with statistics (admin only)."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = await self._request("GET", "admin/agents", headers=headers)
+        return response.json()
 

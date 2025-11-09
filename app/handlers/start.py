@@ -253,7 +253,49 @@ async def process_login_password(message: Message, state: FSMContext, api_client
         # Update processing message
         await processing_msg.edit_text("⏳ Loading your profile...")
         
-        # Get player by user ID to get playerUuid
+        # Check if user is admin
+        user_data = login_response.get("user", {})
+        user_role = user_data.get("role")  # String like "admin"
+        user_role_id = user_data.get("roleId")  # Integer like 7
+        access_token = login_response.get("accessToken")
+        
+        logger.info(f"📋 User role: {user_role}, roleId: {user_role_id}, User ID: {user_id}")
+        
+        # If admin, handle differently (no player profile needed)
+        is_admin = (user_role == "admin") or (user_role_id == config.ADMIN_ROLE_ID)
+        
+        if is_admin:
+            logger.info(f"👑 Admin login detected for user {telegram_id}")
+            
+            # Store admin token and role first
+            if access_token:
+                await storage.set_admin_token(telegram_id, access_token, "admin")
+                logger.info(f"💾 Stored admin token for user {telegram_id}")
+            
+            # Store credentials (this will preserve the admin token we just stored)
+            await storage.set_user_credentials(telegram_id, data["username"], password)
+            logger.info(f"💾 Stored credentials for user {telegram_id}")
+            
+            # Verify token is still there
+            stored_token = await storage.get_admin_token(telegram_id)
+            if stored_token:
+                logger.info(f"✅ Verified admin token is stored for user {telegram_id}")
+            else:
+                logger.warning(f"⚠️ Admin token not found after storing credentials for user {telegram_id}")
+            
+            # Delete processing message and show success
+            await processing_msg.delete()
+            await message.answer(
+                "✅ Admin login successful! Welcome to Admin Panel!"
+            )
+            await state.clear()
+            
+            # Show admin menu
+            from app.handlers.admin_menu import show_admin_menu
+            await show_admin_menu(message, state, api_client, storage)
+            return
+        
+        # Regular player login - get player profile
         try:
             logger.info(f"🔄 Calling /players/user/{user_id} API")
             player_response = await api_client.get_player_by_user_id(user_id)

@@ -53,6 +53,24 @@ class SQLiteStorage(StorageInterface):
                 FOREIGN KEY (telegram_id) REFERENCES players(telegram_id) ON DELETE CASCADE
             )
         """)
+        
+        # Add new columns if they don't exist (migration for existing databases)
+        try:
+            await conn.execute("ALTER TABLE user_credentials ADD COLUMN access_token TEXT")
+            logger.info("✅ Added access_token column to user_credentials table")
+        except Exception as e:
+            # Column might already exist, or table might not exist yet
+            if "duplicate column" not in str(e).lower() and "no such table" not in str(e).lower():
+                logger.debug(f"Could not add access_token column: {e}")
+        
+        try:
+            await conn.execute("ALTER TABLE user_credentials ADD COLUMN role TEXT")
+            logger.info("✅ Added role column to user_credentials table")
+        except Exception as e:
+            # Column might already exist
+            if "duplicate column" not in str(e).lower() and "no such table" not in str(e).lower():
+                logger.debug(f"Could not add role column: {e}")
+        
         await conn.commit()
         logger.info("SQLite database initialized")
     
@@ -166,14 +184,91 @@ class SQLiteStorage(StorageInterface):
         conn = await self._get_connection()
         # For simplicity, store password as-is (in production, use encryption)
         # TODO: Add encryption for password storage
-        await conn.execute(
-            """INSERT OR REPLACE INTO user_credentials 
-               (telegram_id, email, password, updated_at)
-               VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
-            (telegram_id, email, password)
-        )
+        
+        # Check if record exists to preserve access_token and role
+        async with conn.execute(
+            "SELECT access_token, role FROM user_credentials WHERE telegram_id = ?",
+            (telegram_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        
+        if row:
+            # Update existing record, preserving access_token and role
+            await conn.execute(
+                """UPDATE user_credentials 
+                   SET email = ?, password = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE telegram_id = ?""",
+                (email, password, telegram_id)
+            )
+        else:
+            # Insert new record
+            await conn.execute(
+                """INSERT INTO user_credentials 
+                   (telegram_id, email, password, updated_at)
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
+                (telegram_id, email, password)
+            )
         await conn.commit()
         logger.info(f"💾 Stored credentials for telegram_id {telegram_id}")
+    
+    async def set_admin_token(self, telegram_id: int, access_token: str, role: str) -> None:
+        """Store admin access token and role."""
+        conn = await self._get_connection()
+        # Check if credentials exist
+        async with conn.execute(
+            "SELECT email, password FROM user_credentials WHERE telegram_id = ?",
+            (telegram_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        
+        if row:
+            # Update existing record
+            await conn.execute(
+                """UPDATE user_credentials 
+                   SET access_token = ?, role = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE telegram_id = ?""",
+                (access_token, role, telegram_id)
+            )
+        else:
+            # Insert new record (admin might not have email/password stored)
+            await conn.execute(
+                """INSERT INTO user_credentials 
+                   (telegram_id, email, password, access_token, role, updated_at)
+                   VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                (telegram_id, "", "", access_token, role)
+            )
+        await conn.commit()
+        logger.info(f"💾 Stored admin token for telegram_id {telegram_id}, role: {role}")
+    
+    async def get_admin_token(self, telegram_id: int) -> Optional[str]:
+        """Get admin access token."""
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT access_token FROM user_credentials WHERE telegram_id = ?",
+            (telegram_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["access_token"] if row and row["access_token"] else None
+    
+    async def get_user_role(self, telegram_id: int) -> Optional[str]:
+        """Get user role (admin, agent, player)."""
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT role FROM user_credentials WHERE telegram_id = ?",
+            (telegram_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["role"] if row and row["role"] else None
+    
+    async def clear_admin_token(self, telegram_id: int) -> None:
+        """Clear admin access token (logout)."""
+        conn = await self._get_connection()
+        await conn.execute(
+            "UPDATE user_credentials SET access_token = NULL, role = NULL WHERE telegram_id = ?",
+            (telegram_id,)
+        )
+        await conn.commit()
+        logger.info(f"🗑️ Cleared admin token for telegram_id {telegram_id}")
     
     async def get_user_credentials(self, telegram_id: int) -> Optional[Dict[str, str]]:
         """Get stored user credentials."""
