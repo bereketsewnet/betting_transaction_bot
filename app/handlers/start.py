@@ -292,9 +292,31 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             )
             await state.clear()
             
-            # Show admin menu
-            from app.handlers.admin_menu import show_admin_menu
-            await show_admin_menu(message, state, api_client, storage)
+            # Show admin menu (with error handling for web app button)
+            try:
+                from app.handlers.admin_menu import show_admin_menu
+                await show_admin_menu(message, state, api_client, storage)
+            except Exception as menu_error:
+                logger.error(f"❌ Error showing admin menu: {menu_error}", exc_info=True)
+                # Try to show menu without web app button as fallback
+                await message.answer(
+                    "✅ Admin login successful! Welcome to Admin Panel!\n\n"
+                    "⚠️ Note: Mini app button is only available with HTTPS URLs.\n"
+                    "Use '🌐 Open in Browser' button to access the web app."
+                )
+                # Show a simple menu without web app
+                from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+                simple_keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="📋 All Transactions")],
+                        [KeyboardButton(text="🕐 Recent (24h)")],
+                        [KeyboardButton(text="📅 By Date")],
+                        [KeyboardButton(text="🌐 Open in Browser")],
+                        [KeyboardButton(text="🚪 Logout")],
+                    ],
+                    resize_keyboard=True
+                )
+                await message.answer("👑 Admin Panel\n\nSelect an option:", reply_markup=simple_keyboard)
             return
         
         if is_agent:
@@ -323,9 +345,32 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             )
             await state.clear()
             
-            # Show agent menu
-            from app.handlers.agent_menu import show_agent_menu
-            await show_agent_menu(message, state, api_client, storage)
+            # Show agent menu (with error handling for web app button)
+            try:
+                from app.handlers.agent_menu import show_agent_menu
+                await show_agent_menu(message, state, api_client, storage)
+            except Exception as menu_error:
+                logger.error(f"❌ Error showing agent menu: {menu_error}", exc_info=True)
+                # Try to show menu without web app button as fallback
+                await message.answer(
+                    "✅ Agent login successful! Welcome to Agent Panel!\n\n"
+                    "⚠️ Note: Mini app button is only available with HTTPS URLs.\n"
+                    "Use '🌐 Open in Browser' button to access the web app."
+                )
+                # Show a simple menu without web app
+                from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+                simple_keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="📋 My Transactions")],
+                        [KeyboardButton(text="🕐 Recent (24h)")],
+                        [KeyboardButton(text="📅 By Date")],
+                        [KeyboardButton(text="📊 My Stats")],
+                        [KeyboardButton(text="🌐 Open in Browser")],
+                        [KeyboardButton(text="🚪 Logout")],
+                    ],
+                    resize_keyboard=True
+                )
+                await message.answer("👤 Agent Panel\n\nSelect an option:", reply_markup=simple_keyboard)
             return
         
         # Regular player login - get player profile

@@ -24,7 +24,12 @@ async def show_main_menu(message: Message, state: FSMContext, api_client: APICli
     telegram_id = message.from_user.id
     is_logged_in = await storage.is_user_logged_in(telegram_id)
     
-    keyboard = build_main_menu_keyboard(show_logout=is_logged_in)
+    # Get player UUID for web app URL
+    from app.services.player_service import PlayerService
+    player_service = PlayerService(api_client, storage)
+    player_uuid = await player_service.get_player_uuid(telegram_id)
+    
+    keyboard = build_main_menu_keyboard(show_logout=is_logged_in, player_uuid=player_uuid)
     await message.answer(
         "🏠 Main Menu\n\n"
         "Select an option:",
@@ -120,24 +125,28 @@ async def cmd_history(message: Message, state: FSMContext, api_client: APIClient
     await show_transaction_history(message, state, api_client, storage)
 
 
-@router.message(F.text == "🌐 Open Web App")
+@router.message(F.text == "🌐 Open in Browser")
 async def cmd_web_app(message: Message, api_client: APIClient, storage: StorageInterface):
-    """Handle web app redirect."""
+    """Handle web app redirect to browser."""
     from app.services.player_service import PlayerService
+    from app.utils.keyboards import get_web_app_url
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
     player_service = PlayerService(api_client, storage)
     telegram_id = message.from_user.id
     player_uuid = await player_service.get_player_uuid(telegram_id)
     
-    web_url = config.WEB_APP_URL
-    if player_uuid:
-        web_url = f"{web_url}?playerUuid={player_uuid}"
+    web_url = get_web_app_url(player_uuid)
+    
+    # Create inline keyboard with URL button (opens in browser)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌐 Open in Browser", url=web_url)]
+    ])
     
     await message.answer(
-        f"🌐 Opening web app...\n\n"
-        f"Click the link below to access the full web interface:\n"
-        f"{web_url}",
-        disable_web_page_preview=False
+        f"🌐 Web App\n\n"
+        f"Click the button below to open the web app in your browser:",
+        reply_markup=keyboard
     )
 
 
@@ -157,7 +166,8 @@ Main features:
 • 💵 Deposit - Make a deposit transaction
 • 💸 Withdraw - Make a withdrawal transaction
 • 📜 History - View your transaction history
-• 🌐 Open Web App - Access full web interface
+• 📱 Open App - Open mini app (Telegram Web App)
+• 🌐 Open in Browser - Open web app in browser
 • 🚪 Logout - Logout and login with another account
 
 For support, please contact the administrator.

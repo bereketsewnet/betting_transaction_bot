@@ -1,6 +1,7 @@
 """Keyboard builders for inline and reply keyboards."""
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from typing import List, Optional, Dict, Any
+from app.config import config
 
 
 def build_inline_keyboard(
@@ -67,13 +68,44 @@ def build_paginated_inline_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard), total_pages
 
 
-def build_main_menu_keyboard(show_logout: bool = False) -> ReplyKeyboardMarkup:
-    """Build main menu reply keyboard."""
+def get_web_app_url(player_uuid: Optional[str] = None) -> str:
+    """Get web app URL with optional player UUID parameter."""
+    base_url = config.WEB_APP_URL.rstrip('/')
+    if player_uuid:
+        # Use path parameter: /player/{player_uuid}
+        return f"{base_url}/player/{player_uuid}"
+    return base_url
+
+
+def is_https_url(url: str) -> bool:
+    """Check if URL is HTTPS (required for Telegram Web Apps)."""
+    return url.startswith('https://')
+
+
+def build_main_menu_keyboard(show_logout: bool = False, player_uuid: Optional[str] = None) -> ReplyKeyboardMarkup:
+    """Build main menu reply keyboard with mini app button (if HTTPS)."""
+    web_app_url = get_web_app_url(player_uuid)
+    
+    # Check if URL is HTTPS (Telegram Web Apps require HTTPS)
+    can_use_mini_app = is_https_url(web_app_url)
+    
+    # Build first row: mini app button (if HTTPS) + Deposit
+    if can_use_mini_app:
+        # Mini app button (web_app) - appears on left side
+        mini_app_button = KeyboardButton(
+            text="📱 Open App",
+            web_app=WebAppInfo(url=web_app_url)
+        )
+        first_row = [mini_app_button, KeyboardButton(text="💵 Deposit")]
+    else:
+        # Skip mini app button if not HTTPS, just show Deposit
+        first_row = [KeyboardButton(text="💵 Deposit")]
+    
     keyboard = [
-        [KeyboardButton(text="💵 Deposit")],
+        first_row,
         [KeyboardButton(text="💸 Withdraw")],
         [KeyboardButton(text="📜 History")],
-        [KeyboardButton(text="🌐 Open Web App")],
+        [KeyboardButton(text="🌐 Open in Browser")],  # Changed from "Open Web App" to "Open in Browser"
         [KeyboardButton(text="ℹ️ Help")],
     ]
     if show_logout:
