@@ -11,6 +11,7 @@ from app.services.player_service import PlayerService
 from app.utils.keyboards import build_inline_keyboard
 from app.utils.text_templates import TextTemplates
 from app.storage import StorageInterface
+from app.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,7 @@ async def process_login_password(message: Message, state: FSMContext, api_client
         
         # If admin, handle differently (no player profile needed)
         is_admin = (user_role == "admin") or (user_role_id == config.ADMIN_ROLE_ID)
+        is_agent = (user_role == "agent") or (user_role_id == config.AGENT_ROLE_ID)
         
         if is_admin:
             logger.info(f"👑 Admin login detected for user {telegram_id}")
@@ -293,6 +295,37 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             # Show admin menu
             from app.handlers.admin_menu import show_admin_menu
             await show_admin_menu(message, state, api_client, storage)
+            return
+        
+        if is_agent:
+            logger.info(f"👤 Agent login detected for user {telegram_id}")
+            
+            # Store agent token and role first
+            if access_token:
+                await storage.set_admin_token(telegram_id, access_token, "agent")
+                logger.info(f"💾 Stored agent token for user {telegram_id}")
+            
+            # Store credentials (this will preserve the agent token we just stored)
+            await storage.set_user_credentials(telegram_id, data["username"], password)
+            logger.info(f"💾 Stored credentials for user {telegram_id}")
+            
+            # Verify token is still there
+            stored_token = await storage.get_admin_token(telegram_id)
+            if stored_token:
+                logger.info(f"✅ Verified agent token is stored for user {telegram_id}")
+            else:
+                logger.warning(f"⚠️ Agent token not found after storing credentials for user {telegram_id}")
+            
+            # Delete processing message and show success
+            await processing_msg.delete()
+            await message.answer(
+                "✅ Agent login successful! Welcome to Agent Panel!"
+            )
+            await state.clear()
+            
+            # Show agent menu
+            from app.handlers.agent_menu import show_agent_menu
+            await show_agent_menu(message, state, api_client, storage)
             return
         
         # Regular player login - get player profile

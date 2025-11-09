@@ -45,11 +45,14 @@ async def cmd_main_menu(message_or_callback, state: FSMContext, api_client: APIC
         message = message_or_callback
         telegram_id = message.from_user.id
     
-    # Check if user is admin - show admin menu instead
+    # Check if user is admin or agent - show appropriate menu
     user_role = await storage.get_user_role(telegram_id)
     if user_role == "admin":
         from app.handlers.admin_menu import show_admin_menu
         await show_admin_menu(message, state, api_client, storage)
+    elif user_role == "agent":
+        from app.handlers.agent_menu import show_agent_menu
+        await show_agent_menu(message, state, api_client, storage)
     else:
         await show_main_menu(message, state, api_client, storage)
 
@@ -57,13 +60,18 @@ async def cmd_main_menu(message_or_callback, state: FSMContext, api_client: APIC
 @router.message(F.text == "💵 Deposit")
 async def cmd_deposit(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle deposit command."""
-    # Check if user is admin - redirect to admin menu
+    # Check if user is admin or agent - redirect to appropriate menu
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     if user_role == "admin":
         from app.handlers.admin_menu import show_admin_menu
         await message.answer("👑 You are logged in as admin. Use the Admin Panel to manage transactions.")
         await show_admin_menu(message, state, api_client, storage)
+        return
+    elif user_role == "agent":
+        from app.handlers.agent_menu import show_agent_menu
+        await message.answer("👤 You are logged in as agent. Use the Agent Panel to manage your assigned transactions.")
+        await show_agent_menu(message, state, api_client, storage)
         return
     
     from app.handlers.deposit_flow import start_deposit_flow
@@ -73,13 +81,18 @@ async def cmd_deposit(message: Message, state: FSMContext, api_client: APIClient
 @router.message(F.text == "💸 Withdraw")
 async def cmd_withdraw(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle withdraw command."""
-    # Check if user is admin - redirect to admin menu
+    # Check if user is admin or agent - redirect to appropriate menu
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     if user_role == "admin":
         from app.handlers.admin_menu import show_admin_menu
         await message.answer("👑 You are logged in as admin. Use the Admin Panel to manage transactions.")
         await show_admin_menu(message, state, api_client, storage)
+        return
+    elif user_role == "agent":
+        from app.handlers.agent_menu import show_agent_menu
+        await message.answer("👤 You are logged in as agent. Use the Agent Panel to manage your assigned transactions.")
+        await show_agent_menu(message, state, api_client, storage)
         return
     
     from app.handlers.withdraw_flow import start_withdraw_flow
@@ -89,13 +102,18 @@ async def cmd_withdraw(message: Message, state: FSMContext, api_client: APIClien
 @router.message(F.text == "📜 History")
 async def cmd_history(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle history command."""
-    # Check if user is admin - redirect to admin menu
+    # Check if user is admin or agent - redirect to appropriate menu
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     if user_role == "admin":
         from app.handlers.admin_menu import show_admin_menu
         await message.answer("👑 You are logged in as admin. Use the Admin Panel to view all transactions.")
         await show_admin_menu(message, state, api_client, storage)
+        return
+    elif user_role == "agent":
+        from app.handlers.agent_menu import show_agent_menu
+        await message.answer("👤 You are logged in as agent. Use the Agent Panel to view your assigned transactions.")
+        await show_agent_menu(message, state, api_client, storage)
         return
     
     from app.handlers.history import show_transaction_history

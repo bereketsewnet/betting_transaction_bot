@@ -1,4 +1,4 @@
-"""Admin menu handler."""
+"""Agent menu handler."""
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -14,50 +14,47 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-class AdminTransactionStates(StatesGroup):
-    """FSM states for admin transaction management."""
-    selecting_filter = State()
+class AgentTransactionStates(StatesGroup):
+    """FSM states for agent transaction management."""
     entering_date = State()
-    selecting_transaction = State()
-    assigning_agent = State()
     updating_status = State()
 
 
-async def show_admin_menu(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Show admin menu."""
+async def show_agent_menu(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Show agent menu."""
     await state.clear()
     
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
     
-    # Use reply keyboard for better UX (like main menu)
+    # Use reply keyboard for better UX (like admin menu)
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📋 All Transactions")],
+            [KeyboardButton(text="📋 My Transactions")],
             [KeyboardButton(text="🕐 Recent (24h)")],
             [KeyboardButton(text="📅 By Date")],
+            [KeyboardButton(text="📊 My Stats")],
             [KeyboardButton(text="🚪 Logout")],
         ],
         resize_keyboard=True
     )
     
     await message.answer(
-        "👑 Admin Panel\n\n"
+        "👤 Agent Panel\n\n"
         "Select an option:",
         reply_markup=keyboard
     )
 
 
-@router.message(F.text == "📋 All Transactions")
-async def cmd_all_transactions(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle All Transactions button."""
+@router.message(F.text == "📋 My Transactions")
+async def cmd_my_transactions(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Handle My Transactions button."""
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
-    # Only process if user is admin (this button is unique to admin)
-    if user_role != "admin":
-        return  # Don't answer, let other handlers process it
+    if user_role != "agent":
+        await message.answer("❌ Agent access required.")
+        return
     
-    # Call the shared function directly
-    await show_all_transactions_for_message(message, state, api_client, storage)
+    await show_my_transactions_for_message(message, state, api_client, storage)
 
 
 @router.message(F.text == "🕐 Recent (24h)")
@@ -66,13 +63,13 @@ async def cmd_recent_transactions(message: Message, state: FSMContext, api_clien
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     
-    if user_role == "admin":
-        # Call admin function
+    if user_role == "agent":
+        # Call agent function
         await show_recent_transactions_for_message(message, state, api_client, storage)
-    elif user_role == "agent":
-        # Route to agent handler
-        from app.handlers.agent_menu import show_recent_transactions_for_message as agent_show_recent
-        await agent_show_recent(message, state, api_client, storage)
+    elif user_role == "admin":
+        # Route to admin handler
+        from app.handlers.admin_menu import show_recent_transactions_for_message as admin_show_recent
+        await admin_show_recent(message, state, api_client, storage)
     else:
         await message.answer("❌ Please login as admin or agent to use this feature.")
 
@@ -83,37 +80,36 @@ async def cmd_by_date(message: Message, state: FSMContext, api_client: APIClient
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     
-    if user_role == "admin":
-        # Call admin function
+    if user_role == "agent":
+        # Call agent function
         await request_date_for_message(message, state)
-    elif user_role == "agent":
-        # Route to agent handler
-        from app.handlers.agent_menu import request_date_for_message as agent_request_date
-        await agent_request_date(message, state)
+    elif user_role == "admin":
+        # Route to admin handler
+        from app.handlers.admin_menu import request_date_for_message as admin_request_date
+        await admin_request_date(message, state)
     else:
         await message.answer("❌ Please login as admin or agent to use this feature.")
 
 
-async def request_date_for_message(message: Message, state: FSMContext):
-    """Request date for filtering transactions (from text message)."""
-    await state.set_state(AdminTransactionStates.entering_date)
-    await message.answer(
-        "📅 Filter by Date\n\n"
-        "Please enter the date (YYYY-MM-DD):\n"
-        "Example: 2025-11-08",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]
-        ])
-    )
+@router.message(F.text == "📊 My Stats")
+async def cmd_my_stats(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Handle My Stats button."""
+    telegram_id = message.from_user.id
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role != "agent":
+        await message.answer("❌ Agent access required.")
+        return
+    
+    await show_agent_stats(message, state, api_client, storage)
 
 
 @router.message(F.text == "🚪 Logout")
-async def cmd_admin_logout(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle admin logout button."""
+async def cmd_agent_logout(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Handle agent logout button."""
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
-    if user_role != "admin":
-        await message.answer("❌ Admin access required.")
+    if user_role != "agent":
+        await message.answer("❌ Agent access required.")
         return
     
     try:
@@ -126,7 +122,7 @@ async def cmd_admin_logout(message: Message, state: FSMContext, api_client: APIC
             except:
                 pass  # Ignore logout API errors
         
-        # Clear admin token and credentials
+        # Clear agent token and credentials
         await storage.clear_admin_token(telegram_id)
         await storage.clear_user_credentials(telegram_id)
         
@@ -138,71 +134,43 @@ async def cmd_admin_logout(message: Message, state: FSMContext, api_client: APIC
         await cmd_start(message, state, api_client, storage)
         
     except Exception as e:
-        logger.error(f"Error during admin logout: {e}")
+        logger.error(f"Error during agent logout: {e}")
         await message.answer("❌ Error during logout. Please try again.")
 
 
-@router.callback_query(F.data == "admin:logout")
-async def admin_logout(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Admin logout from callback."""
-    await callback.answer()
-    
-    telegram_id = callback.from_user.id
-    
-    try:
-        # Get access token
-        access_token = await storage.get_admin_token(telegram_id)
-        if access_token:
-            # Call logout API
-            try:
-                await api_client.logout()
-            except:
-                pass  # Ignore logout API errors
-        
-        # Clear admin token and credentials
-        await storage.clear_admin_token(telegram_id)
-        await storage.clear_user_credentials(telegram_id)
-        
-        await callback.message.edit_text("✅ Logged out successfully.")
-        await state.clear()
-        
-        # Return to start
-        from app.handlers.start import cmd_start
-        await cmd_start(callback.message, state, api_client, storage)
-        
-    except Exception as e:
-        logger.error(f"Error during admin logout: {e}")
-        await callback.message.edit_text("❌ Error during logout. Please try again.")
-
-
-async def show_all_transactions_for_message(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Show all transactions (shared function for message and callback)."""
+async def show_my_transactions_for_message(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Show all assigned transactions for agent."""
     telegram_id = message.from_user.id
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role != "agent":
+        await message.answer("❌ Agent access required.")
+        return
+    
     access_token = await storage.get_admin_token(telegram_id)
     
     if not access_token:
-        await message.answer("❌ Admin session expired. Please login again.")
+        await message.answer("❌ Agent session expired. Please login again.")
         return
     
     try:
-        processing_msg = await message.answer("⏳ Fetching transactions...")
+        processing_msg = await message.answer("⏳ Fetching your transactions...")
         
-        response = await api_client.get_admin_transactions(
+        response = await api_client.get_agent_tasks(
             access_token=access_token,
             page=1,
-            limit=20,
+            limit=100,  # Get more transactions to filter
         )
         
-        transactions = response.get("transactions", [])
+        transactions = response.get("tasks", []) or response.get("transactions", [])
         pagination = response.get("pagination", {})
         
         await processing_msg.delete()
         
         if not transactions:
             await message.answer(
-                "📋 All Transactions\n\n"
-                "No transactions found.",
-                reply_markup=build_admin_back_keyboard()
+                "📋 My Transactions\n\n"
+                "No assigned transactions found.",
+                reply_markup=build_agent_back_keyboard()
             )
             return
         
@@ -211,7 +179,7 @@ async def show_all_transactions_for_message(message: Message, state: FSMContext,
         await state.update_data(transactions_cache=transactions_dict)
         
         # Build transaction list
-        text = f"📋 All Transactions\n\n"
+        text = f"📋 My Transactions\n\n"
         text += f"Total: {pagination.get('total', len(transactions))}\n"
         text += f"Page: {pagination.get('page', 1)}/{pagination.get('pages', 1)}\n\n"
         text += "Select a transaction:\n\n"
@@ -228,17 +196,17 @@ async def show_all_transactions_for_message(message: Message, state: FSMContext,
             button_text = f"{tx_type} {tx_currency} {tx_amount} - {tx_status} ({tx_date})"
             buttons.append([InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"admin:tx:{tx_id}"
+                callback_data=f"agent:tx:{tx_id}"
             )])
         
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")])
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="agent:back")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
         
         await message.answer(text, reply_markup=keyboard)
         
     except Exception as e:
-        logger.error(f"Error fetching all transactions: {e}", exc_info=True)
+        logger.error(f"Error fetching agent transactions: {e}", exc_info=True)
         await message.answer(
             f"❌ Error fetching transactions.\n\n"
             f"Error: {type(e).__name__}\n"
@@ -246,20 +214,18 @@ async def show_all_transactions_for_message(message: Message, state: FSMContext,
         )
 
 
-@router.callback_query(F.data == "admin:transactions:all")
-async def show_all_transactions(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Show all transactions (callback handler)."""
-    await callback.answer()
-    await show_all_transactions_for_message(callback.message, state, api_client, storage)
-
-
 async def show_recent_transactions_for_message(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Show recent transactions (last 24 hours) - shared function for message and callback."""
+    """Show recent transactions (last 24 hours) for agent."""
     telegram_id = message.from_user.id
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role != "agent":
+        await message.answer("❌ Agent access required.")
+        return
+    
     access_token = await storage.get_admin_token(telegram_id)
     
     if not access_token:
-        await message.answer("❌ Admin session expired. Please login again.")
+        await message.answer("❌ Agent session expired. Please login again.")
         return
     
     try:
@@ -270,15 +236,14 @@ async def show_recent_transactions_for_message(message: Message, state: FSMConte
         now = datetime.now(timezone.utc)  # Use UTC for consistent comparison
         twenty_four_hours_ago = now - timedelta(hours=24)
         
-        # Note: API might not support date filtering directly, so we'll fetch all and filter client-side
-        # Or use the API if it supports date filtering
-        response = await api_client.get_admin_transactions(
+        # Fetch all transactions and filter by date
+        response = await api_client.get_agent_tasks(
             access_token=access_token,
             page=1,
             limit=100,  # Get more transactions to filter
         )
         
-        transactions = response.get("transactions", [])
+        transactions = response.get("tasks", []) or response.get("transactions", [])
         
         # Filter transactions from last 24 hours (compare full datetime, not just date)
         recent_transactions = []
@@ -317,7 +282,7 @@ async def show_recent_transactions_for_message(message: Message, state: FSMConte
             await message.answer(
                 "🕐 Recent Transactions (24h)\n\n"
                 "No transactions found in the last 24 hours.",
-                reply_markup=build_admin_back_keyboard()
+                reply_markup=build_agent_back_keyboard()
             )
             return
         
@@ -342,10 +307,10 @@ async def show_recent_transactions_for_message(message: Message, state: FSMConte
             button_text = f"{tx_type} {tx_currency} {tx_amount} - {tx_status} ({tx_date})"
             buttons.append([InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"admin:tx:{tx_id}"
+                callback_data=f"agent:tx:{tx_id}"
             )])
         
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")])
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="agent:back")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
         
@@ -360,32 +325,30 @@ async def show_recent_transactions_for_message(message: Message, state: FSMConte
         )
 
 
-@router.callback_query(F.data == "admin:transactions:recent")
-async def show_recent_transactions(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Show recent transactions (callback handler)."""
-    await callback.answer()
-    await show_recent_transactions_for_message(callback.message, state, api_client, storage)
-
-
-@router.callback_query(F.data == "admin:transactions:date")
-async def request_date(callback: CallbackQuery, state: FSMContext):
-    """Request date for filtering transactions."""
-    await callback.answer()
-    
-    await state.set_state(AdminTransactionStates.entering_date)
-    await callback.message.edit_text(
+async def request_date_for_message(message: Message, state: FSMContext):
+    """Request date for filtering transactions (from text message)."""
+    await state.set_state(AgentTransactionStates.entering_date)
+    await message.answer(
         "📅 Filter by Date\n\n"
         "Please enter the date (YYYY-MM-DD):\n"
         "Example: 2025-11-08",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]
+            [InlineKeyboardButton(text="🔙 Back", callback_data="agent:back")]
         ])
     )
 
 
-@router.message(AdminTransactionStates.entering_date, F.text)
+@router.message(AgentTransactionStates.entering_date, F.text)
 async def show_transactions_by_date(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Show transactions for a specific date."""
+    # Check if user is agent
+    telegram_id = message.from_user.id
+    user_role = await storage.get_user_role(telegram_id)
+    if user_role != "agent":
+        await message.answer("❌ Agent access required.")
+        await state.clear()
+        return
+    
     date_str = message.text.strip()
     
     try:
@@ -400,24 +363,23 @@ async def show_transactions_by_date(message: Message, state: FSMContext, api_cli
         )
         return
     
-    telegram_id = message.from_user.id
     access_token = await storage.get_admin_token(telegram_id)
     
     if not access_token:
-        await message.answer("❌ Admin session expired. Please login again.")
+        await message.answer("❌ Agent session expired. Please login again.")
         return
     
     try:
         processing_msg = await message.answer("⏳ Fetching transactions...")
         
         # Fetch all transactions and filter by date
-        response = await api_client.get_admin_transactions(
+        response = await api_client.get_agent_tasks(
             access_token=access_token,
             page=1,
-            limit=50,
+            limit=100,  # Get more transactions to filter
         )
         
-        transactions = response.get("transactions", [])
+        transactions = response.get("tasks", []) or response.get("transactions", [])
         
         # Filter transactions by date
         filtered_transactions = []
@@ -437,7 +399,7 @@ async def show_transactions_by_date(message: Message, state: FSMContext, api_cli
             await message.answer(
                 f"📅 Transactions for {start_date}\n\n"
                 "No transactions found for this date.",
-                reply_markup=build_admin_back_keyboard()
+                reply_markup=build_agent_back_keyboard()
             )
             return
         
@@ -461,10 +423,10 @@ async def show_transactions_by_date(message: Message, state: FSMContext, api_cli
             button_text = f"{tx_type} {tx_currency} {tx_amount} - {tx_status}"
             buttons.append([InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"admin:tx:{tx_id}"
+                callback_data=f"agent:tx:{tx_id}"
             )])
         
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")])
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="agent:back")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
         
@@ -480,7 +442,50 @@ async def show_transactions_by_date(message: Message, state: FSMContext, api_cli
         )
 
 
-@router.callback_query(F.data.startswith("admin:tx:"))
+async def show_agent_stats(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Show agent statistics."""
+    telegram_id = message.from_user.id
+    access_token = await storage.get_admin_token(telegram_id)
+    
+    if not access_token:
+        await message.answer("❌ Agent session expired. Please login again.")
+        return
+    
+    try:
+        processing_msg = await message.answer("⏳ Fetching statistics...")
+        
+        stats = await api_client.get_agent_stats(access_token)
+        
+        await processing_msg.delete()
+        
+        stats_data = stats.get("stats", {})
+        
+        text = "📊 My Statistics\n\n"
+        text += f"Total Assigned: {stats_data.get('totalAssigned', 0)}\n"
+        text += f"Pending: {stats_data.get('pending', 0)}\n"
+        text += f"In Progress: {stats_data.get('inProgress', 0)}\n"
+        text += f"Completed: {stats_data.get('completed', 0)}\n"
+        text += f"Failed: {stats_data.get('failed', 0)}\n"
+        
+        avg_rating = stats_data.get('averageRating')
+        if avg_rating:
+            text += f"Average Rating: {avg_rating:.1f}\n"
+        
+        await message.answer(
+            text,
+            reply_markup=build_agent_back_keyboard()
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching agent stats: {e}", exc_info=True)
+        await message.answer(
+            f"❌ Error fetching statistics.\n\n"
+            f"Error: {type(e).__name__}\n"
+            f"Please try again."
+        )
+
+
+@router.callback_query(F.data.startswith("agent:tx:"))
 async def show_transaction_details(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Show transaction details with action buttons."""
     await callback.answer()
@@ -490,7 +495,7 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
     access_token = await storage.get_admin_token(telegram_id)
     
     if not access_token:
-        await callback.message.edit_text("❌ Admin session expired. Please login again.")
+        await callback.message.edit_text("❌ Agent session expired. Please login again.")
         return
     
     try:
@@ -507,13 +512,13 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
             processing_msg = await callback.message.answer("⏳ Fetching transaction details...")
             
             # Fetch all transactions and find the one we need
-            response = await api_client.get_admin_transactions(
+            response = await api_client.get_agent_tasks(
                 access_token=access_token,
                 page=1,
-                limit=100,  # Get more to find the transaction
+                limit=100,
             )
             
-            transactions = response.get("transactions", [])
+            transactions = response.get("tasks", []) or response.get("transactions", [])
             
             # Find transaction by ID
             tx = None
@@ -536,15 +541,11 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
             await state.update_data(transactions_cache=transactions_cache)
             logger.info(f"✅ Fetched and cached transaction {transaction_id}")
         
-        # Log transaction structure for debugging
-        logger.info(f"📋 Transaction data for ID {transaction_id}: {tx}")
-        logger.debug(f"📋 Transaction keys: {list(tx.keys()) if isinstance(tx, dict) else 'Not a dict'}")
-        
-        # Format transaction details with fallbacks for different field names
+        # Format transaction details (same as admin menu)
         tx_type = tx.get("type") or tx.get("transactionType") or "N/A"
         tx_status = tx.get("status") or "N/A"
         
-        # Handle amount (could be string, int, or float)
+        # Handle amount
         tx_amount_raw = tx.get("amount")
         if tx_amount_raw is None:
             tx_amount = "N/A"
@@ -556,7 +557,7 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
         tx_currency = tx.get("currency") or "ETB"
         tx_uuid = tx.get("transactionUuid") or tx.get("uuid") or tx.get("id") or "N/A"
         
-        # Handle date (try multiple field names)
+        # Handle date
         tx_date_raw = tx.get("createdAt") or tx.get("created_at") or tx.get("requestedAt") or tx.get("requested_at") or tx.get("date")
         if tx_date_raw:
             try:
@@ -572,12 +573,12 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
         deposit_bank = tx.get("depositBank") or tx.get("deposit_bank") or {}
         withdrawal_bank = tx.get("withdrawalBank") or tx.get("withdrawal_bank") or {}
         betting_site = tx.get("bettingSite") or tx.get("betting_site") or {}
-        assigned_agent = tx.get("assignedAgent") or tx.get("assigned_agent") or {}
         
         # Additional fields
         withdrawal_address = tx.get("withdrawalAddress") or tx.get("withdrawal_address")
         player_site_id = tx.get("playerSiteId") or tx.get("player_site_id")
         screenshot_url = tx.get("screenshotUrl") or tx.get("screenshot_url")
+        agent_notes = tx.get("agentNotes") or tx.get("agent_notes")
         
         text = f"📋 Transaction Details\n\n"
         text += f"ID: {transaction_id}\n"
@@ -600,21 +601,16 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
             text += f"Betting Site: {site_name}\n"
         if player_site_id:
             text += f"Player Site ID: {player_site_id}\n"
-        if assigned_agent:
-            agent_name = assigned_agent.get("displayName") or assigned_agent.get("display_name") or assigned_agent.get("username") or "N/A"
-            text += f"Assigned Agent: {agent_name}\n"
-        if screenshot_url:
-            # Make screenshot URL clickable
-            text += f"\n📎 Screenshot: <a href=\"{screenshot_url}\">View Image</a>\n"
+        if agent_notes:
+            text += f"Agent Notes: {agent_notes}\n"
         
         # Store transaction ID in state
         await state.update_data(selected_transaction_id=transaction_id)
         
-        # Build action buttons
+        # Build action buttons (agent can only update status)
         buttons = [
-            [InlineKeyboardButton(text="👤 Assign Agent", callback_data=f"admin:assign:{transaction_id}")],
-            [InlineKeyboardButton(text="✅ Update Status", callback_data=f"admin:status:{transaction_id}")],
-            [InlineKeyboardButton(text="🔙 Back", callback_data="admin:back")]
+            [InlineKeyboardButton(text="✅ Update Status", callback_data=f"agent:status:{transaction_id}")],
+            [InlineKeyboardButton(text="🔙 Back", callback_data="agent:back")]
         ]
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -622,7 +618,7 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
         # Send transaction details with screenshot as image if available
         if screenshot_url:
             try:
-                # Try to send the screenshot as an image
+                # Try to send the screenshot as an image (don't include screenshot URL in caption since image is displayed)
                 from aiogram.types import URLInputFile
                 try:
                     await callback.message.delete()  # Try to delete the previous message
@@ -631,18 +627,18 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
                 
                 await callback.message.answer_photo(
                     photo=URLInputFile(screenshot_url),
-                    caption=text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
+                    caption=text,  # Text already doesn't include screenshot URL
+                    reply_markup=keyboard
                 )
             except Exception as e:
                 logger.warning(f"⚠️ Could not send screenshot as image: {e}, sending as text with link")
-                # Fallback: send as text with clickable link
+                # Fallback: add screenshot link to text and send as text
+                fallback_text = text + f"\n📎 Screenshot: <a href=\"{screenshot_url}\">View Image</a>"
                 try:
-                    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+                    await callback.message.edit_text(fallback_text, reply_markup=keyboard, parse_mode="HTML")
                 except:
                     # If edit fails, send new message
-                    await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+                    await callback.message.answer(fallback_text, reply_markup=keyboard, parse_mode="HTML")
         else:
             await callback.message.edit_text(text, reply_markup=keyboard)
         
@@ -654,126 +650,7 @@ async def show_transaction_details(callback: CallbackQuery, state: FSMContext, a
         )
 
 
-@router.callback_query(F.data.startswith("admin:assign:"))
-async def assign_agent_start(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Start agent assignment process."""
-    await callback.answer()
-    
-    transaction_id = int(callback.data.split(":")[-1])
-    telegram_id = callback.from_user.id
-    access_token = await storage.get_admin_token(telegram_id)
-    
-    if not access_token:
-        await callback.message.edit_text("❌ Admin session expired. Please login again.")
-        return
-    
-    try:
-        # Get agents list
-        processing_msg = await callback.message.answer("⏳ Loading agents...")
-        
-        agents_response = await api_client.get_agents(access_token)
-        agents = agents_response.get("agents", [])
-        
-        await processing_msg.delete()
-        
-        if not agents:
-            await callback.message.edit_text(
-                "❌ No agents available.",
-                reply_markup=build_admin_back_keyboard()
-            )
-            return
-        
-        # Store transaction ID
-        await state.update_data(selected_transaction_id=transaction_id)
-        await state.set_state(AdminTransactionStates.assigning_agent)
-        
-        # Build agent selection buttons
-        buttons = []
-        for agent in agents:
-            agent_id = agent.get("id")
-            agent_name = agent.get("displayName", agent.get("username", "Unknown"))
-            buttons.append([InlineKeyboardButton(
-                text=f"👤 {agent_name}",
-                callback_data=f"admin:assign_agent:{transaction_id}:{agent_id}"
-            )])
-        
-        buttons.append([InlineKeyboardButton(text="🔙 Cancel", callback_data=f"admin:tx:{transaction_id}")])
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        
-        await callback.message.edit_text(
-            f"👤 Assign Agent\n\n"
-            f"Transaction ID: {transaction_id}\n\n"
-            f"Select an agent:",
-            reply_markup=keyboard
-        )
-        
-    except Exception as e:
-        logger.error(f"Error loading agents: {e}", exc_info=True)
-        await callback.message.edit_text(
-            f"❌ Error loading agents.\n\n"
-            f"Error: {type(e).__name__}"
-        )
-
-
-@router.callback_query(F.data.startswith("admin:assign_agent:"))
-async def assign_agent_confirm(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Confirm and assign agent to transaction."""
-    await callback.answer()
-    
-    parts = callback.data.split(":")
-    transaction_id = int(parts[2])
-    agent_id = int(parts[3])
-    
-    telegram_id = callback.from_user.id
-    access_token = await storage.get_admin_token(telegram_id)
-    
-    if not access_token:
-        await callback.message.edit_text("❌ Admin session expired. Please login again.")
-        return
-    
-    try:
-        processing_msg = await callback.message.answer("⏳ Assigning agent...")
-        
-        response = await api_client.assign_transaction_to_agent(
-            access_token=access_token,
-            transaction_id=transaction_id,
-            agent_id=agent_id,
-        )
-        
-        await processing_msg.delete()
-        
-        updated_transaction = response.get("transaction", {})
-        agent_name = updated_transaction.get("assignedAgent", {}).get("displayName", "Unknown")
-        
-        # Update cache with updated transaction
-        data = await state.get_data()
-        transactions_cache = data.get("transactions_cache", {})
-        transactions_cache[transaction_id] = updated_transaction
-        await state.update_data(transactions_cache=transactions_cache)
-        logger.info(f"✅ Updated transaction {transaction_id} in cache after agent assignment")
-        
-        await callback.message.edit_text(
-            f"✅ Agent Assigned Successfully!\n\n"
-            f"Transaction ID: {transaction_id}\n"
-            f"Agent: {agent_name}\n\n"
-            f"Transaction has been assigned to the agent.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Back to Transaction", callback_data=f"admin:tx:{transaction_id}")],
-                [InlineKeyboardButton(text="🏠 Admin Menu", callback_data="admin:back")]
-            ])
-        )
-        
-    except Exception as e:
-        logger.error(f"Error assigning agent: {e}", exc_info=True)
-        await callback.message.edit_text(
-            f"❌ Error assigning agent.\n\n"
-            f"Error: {type(e).__name__}\n"
-            f"Please try again."
-        )
-
-
-@router.callback_query(F.data.startswith("admin:status:"))
+@router.callback_query(F.data.startswith("agent:status:"))
 async def update_status_start(callback: CallbackQuery, state: FSMContext):
     """Start status update process."""
     await callback.answer()
@@ -782,16 +659,14 @@ async def update_status_start(callback: CallbackQuery, state: FSMContext):
     
     # Store transaction ID
     await state.update_data(selected_transaction_id=transaction_id)
-    await state.set_state(AdminTransactionStates.updating_status)
+    await state.set_state(AgentTransactionStates.updating_status)
     
-    # Status options
+    # Status options (agent can set: IN_PROGRESS, SUCCESS, FAILED)
     buttons = [
-        [InlineKeyboardButton(text="⏳ PENDING", callback_data=f"admin:set_status:{transaction_id}:PENDING")],
-        [InlineKeyboardButton(text="🔄 IN_PROGRESS", callback_data=f"admin:set_status:{transaction_id}:IN_PROGRESS")],
-        [InlineKeyboardButton(text="✅ SUCCESS", callback_data=f"admin:set_status:{transaction_id}:SUCCESS")],
-        [InlineKeyboardButton(text="❌ FAILED", callback_data=f"admin:set_status:{transaction_id}:FAILED")],
-        [InlineKeyboardButton(text="🚫 CANCELLED", callback_data=f"admin:set_status:{transaction_id}:CANCELLED")],
-        [InlineKeyboardButton(text="🔙 Cancel", callback_data=f"admin:tx:{transaction_id}")]
+        [InlineKeyboardButton(text="🔄 IN_PROGRESS", callback_data=f"agent:set_status:{transaction_id}:IN_PROGRESS")],
+        [InlineKeyboardButton(text="✅ SUCCESS", callback_data=f"agent:set_status:{transaction_id}:SUCCESS")],
+        [InlineKeyboardButton(text="❌ FAILED", callback_data=f"agent:set_status:{transaction_id}:FAILED")],
+        [InlineKeyboardButton(text="🔙 Cancel", callback_data=f"agent:tx:{transaction_id}")]
     ]
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -804,7 +679,7 @@ async def update_status_start(callback: CallbackQuery, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("admin:set_status:"))
+@router.callback_query(F.data.startswith("agent:set_status:"))
 async def update_status_confirm(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Confirm and update transaction status."""
     await callback.answer()
@@ -817,13 +692,13 @@ async def update_status_confirm(callback: CallbackQuery, state: FSMContext, api_
     access_token = await storage.get_admin_token(telegram_id)
     
     if not access_token:
-        await callback.message.edit_text("❌ Admin session expired. Please login again.")
+        await callback.message.edit_text("❌ Agent session expired. Please login again.")
         return
     
     try:
         processing_msg = await callback.message.answer("⏳ Updating status...")
         
-        response = await api_client.update_transaction_status(
+        response = await api_client.process_transaction(
             access_token=access_token,
             transaction_id=transaction_id,
             status=status,
@@ -837,7 +712,23 @@ async def update_status_confirm(callback: CallbackQuery, state: FSMContext, api_
         # Update cache with updated transaction
         data = await state.get_data()
         transactions_cache = data.get("transactions_cache", {})
-        transactions_cache[transaction_id] = updated_transaction
+        
+        # Get existing transaction data if available
+        existing_tx = transactions_cache.get(transaction_id, {})
+        
+        # Merge: existing data first, then updated fields on top
+        if existing_tx:
+            merged_tx = {**existing_tx, **updated_transaction}
+            # Preserve important fields
+            for key in ["type", "amount", "currency", "transactionUuid", "createdAt", "requestedAt", 
+                        "playerSiteId", "withdrawalAddress", "screenshotUrl", "id", "depositBank", 
+                        "withdrawalBank", "bettingSite"]:
+                if key not in updated_transaction and key in existing_tx:
+                    merged_tx[key] = existing_tx[key]
+            transactions_cache[transaction_id] = merged_tx
+        else:
+            transactions_cache[transaction_id] = updated_transaction
+        
         await state.update_data(transactions_cache=transactions_cache)
         logger.info(f"✅ Updated transaction {transaction_id} in cache after status update")
         
@@ -847,8 +738,8 @@ async def update_status_confirm(callback: CallbackQuery, state: FSMContext, api_
             f"New Status: {new_status}\n\n"
             f"Transaction status has been updated.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Back to Transaction", callback_data=f"admin:tx:{transaction_id}")],
-                [InlineKeyboardButton(text="🏠 Admin Menu", callback_data="admin:back")]
+                [InlineKeyboardButton(text="🔙 Back to Transaction", callback_data=f"agent:tx:{transaction_id}")],
+                [InlineKeyboardButton(text="🏠 Agent Menu", callback_data="agent:back")]
             ])
         )
         
@@ -861,12 +752,11 @@ async def update_status_confirm(callback: CallbackQuery, state: FSMContext, api_
         )
 
 
-@router.callback_query(F.data == "admin:back")
-async def back_to_admin_menu(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Go back to admin menu."""
+@router.callback_query(F.data == "agent:back")
+async def back_to_agent_menu(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Go back to agent menu."""
     await callback.answer()
     # Don't clear state completely - preserve transactions_cache if it exists
-    # Only clear FSM states, not the cache
     current_data = await state.get_data()
     transactions_cache = current_data.get("transactions_cache", {})
     
@@ -875,12 +765,12 @@ async def back_to_admin_menu(callback: CallbackQuery, state: FSMContext, api_cli
     if transactions_cache:
         await state.update_data(transactions_cache=transactions_cache)
     
-    await show_admin_menu(callback.message, state, api_client, storage)
+    await show_agent_menu(callback.message, state, api_client, storage)
 
 
-def build_admin_back_keyboard() -> InlineKeyboardMarkup:
-    """Build back to admin menu keyboard."""
+def build_agent_back_keyboard() -> InlineKeyboardMarkup:
+    """Build back to agent menu keyboard."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Back to Admin Menu", callback_data="admin:back")]
+        [InlineKeyboardButton(text="🔙 Back to Agent Menu", callback_data="agent:back")]
     ])
 

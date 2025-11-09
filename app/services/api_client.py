@@ -490,4 +490,52 @@ class APIClient:
         headers = {"Authorization": f"Bearer {access_token}"}
         response = await self._request("GET", "admin/agents", headers=headers)
         return response.json()
+    
+    # Agent endpoints
+    
+    async def get_agent_tasks(
+        self,
+        access_token: str,
+        page: int = 1,
+        limit: int = 20,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get assigned tasks for agent."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        params = {"page": page, "limit": limit}
+        if status:
+            params["status"] = status
+        
+        response = await self._request("GET", "agent/tasks", params=params, headers=headers)
+        return response.json()
+    
+    async def process_transaction(
+        self,
+        access_token: str,
+        transaction_id: int,
+        status: str,
+        agent_notes: Optional[str] = None,
+        evidence_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Process/update transaction (agent only)."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        json_data = {"status": status}
+        if agent_notes:
+            json_data["agentNotes"] = agent_notes
+        if evidence_url:
+            json_data["evidenceUrl"] = evidence_url
+        
+        response = await self._request(
+            "PUT",
+            f"agent/transactions/{transaction_id}/process",
+            json_data=json_data,
+            headers=headers,
+        )
+        return response.json()
+    
+    async def get_agent_stats(self, access_token: str) -> Dict[str, Any]:
+        """Get agent statistics."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = await self._request("GET", "agent/stats", headers=headers)
+        return response.json()
 
