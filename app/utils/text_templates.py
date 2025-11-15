@@ -13,10 +13,11 @@ class TextTemplates:
         """Get welcome message from API."""
         try:
             response = await self.api_client.get_welcome(language_code)
-            return response.message
+            # Return empty string if message is empty or just whitespace
+            return response.message.strip() if response.message else ""
         except Exception:
-            # Fallback message
-            return "Welcome to Betting Payment Manager! Please choose your preferred language to continue."
+            # Return empty string instead of fallback message
+            return ""
     
     @staticmethod
     def format_transaction_details(transaction: dict) -> str:

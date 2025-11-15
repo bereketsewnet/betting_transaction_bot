@@ -84,7 +84,7 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
             language_code=language_code,
         )
         
-        # Get welcome message
+        # Get welcome message (optional - can be empty if user has their own)
         templates = TextTemplates(api_client)
         welcome_text = await templates.get_welcome_message(language_code)
         
@@ -96,8 +96,14 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
         ]
         keyboard = build_inline_keyboard(buttons, row_width=1)
         
+        # Only show welcome text if it's not empty, otherwise just show the question
+        if welcome_text and welcome_text.strip():
+            message_text = f"{welcome_text}\n\nWhat would you like to do?"
+        else:
+            message_text = "What would you like to do?"
+        
         await callback.message.edit_text(
-            f"{welcome_text}\n\nWhat would you like to do?",
+            message_text,
             reply_markup=keyboard
         )
     except Exception as e:
