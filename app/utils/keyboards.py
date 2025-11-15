@@ -115,9 +115,31 @@ def is_valid_web_app_url(url: str) -> bool:
     return True
 
 
-def build_main_menu_keyboard(show_logout: bool = False, player_uuid: Optional[str] = None) -> ReplyKeyboardMarkup:
+async def build_main_menu_keyboard(
+    show_logout: bool = False, 
+    player_uuid: Optional[str] = None,
+    templates = None,
+    lang: str = "en"
+) -> ReplyKeyboardMarkup:
     """Build main menu reply keyboard with mini app button (if valid URL)."""
     web_app_url = get_web_app_url(player_uuid)
+    
+    # Get button texts from templates if available
+    if templates:
+        button_deposit = await templates.get_template("button_deposit", lang, "💵 Deposit")
+        button_withdraw = await templates.get_template("button_withdraw", lang, "💸 Withdraw")
+        button_history = await templates.get_template("button_history", lang, "📜 History")
+        button_open_browser = await templates.get_template("button_open_browser", lang, "🌐 Open in Browser")
+        button_help = await templates.get_template("button_help", lang, "ℹ️ Help")
+        button_logout = await templates.get_template("button_logout", lang, "🚪 Logout")
+    else:
+        # Fallback to English if templates not provided
+        button_deposit = "💵 Deposit"
+        button_withdraw = "💸 Withdraw"
+        button_history = "📜 History"
+        button_open_browser = "🌐 Open in Browser"
+        button_help = "ℹ️ Help"
+        button_logout = "🚪 Logout"
     
     # Check if URL is valid for Telegram Web Apps (HTTPS + not localhost)
     can_use_mini_app = is_valid_web_app_url(web_app_url)
@@ -129,20 +151,20 @@ def build_main_menu_keyboard(show_logout: bool = False, player_uuid: Optional[st
             text="📱 Open App",
             web_app=WebAppInfo(url=web_app_url)
         )
-        first_row = [mini_app_button, KeyboardButton(text="💵 Deposit")]
+        first_row = [mini_app_button, KeyboardButton(text=button_deposit)]
     else:
         # Skip mini app button if URL is invalid (HTTP or localhost), just show Deposit
-        first_row = [KeyboardButton(text="💵 Deposit")]
+        first_row = [KeyboardButton(text=button_deposit)]
     
     keyboard = [
         first_row,
-        [KeyboardButton(text="💸 Withdraw")],
-        [KeyboardButton(text="📜 History")],
-        [KeyboardButton(text="🌐 Open in Browser")],  # Changed from "Open Web App" to "Open in Browser"
-        [KeyboardButton(text="ℹ️ Help")],
+        [KeyboardButton(text=button_withdraw)],
+        [KeyboardButton(text=button_history)],
+        [KeyboardButton(text=button_open_browser)],
+        [KeyboardButton(text=button_help)],
     ]
     if show_logout:
-        keyboard.append([KeyboardButton(text="🚪 Logout")])
+        keyboard.append([KeyboardButton(text=button_logout)])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 

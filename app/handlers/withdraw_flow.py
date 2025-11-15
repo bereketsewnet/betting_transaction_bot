@@ -255,18 +255,17 @@ async def process_withdraw_screenshot(message: Message, state: FSMContext):
     await proceed_to_withdraw_confirmation(message, state)
 
 
-@router.message(WithdrawStates.uploading_screenshot, F.text == "/skip")
-async def skip_withdraw_screenshot(message: Message, state: FSMContext):
-    """Skip screenshot upload."""
-    logger.info(f"⏭️ User {message.from_user.id} skipping screenshot upload in withdrawal flow")
-    await state.update_data(screenshot_file_id=None)
-    await proceed_to_withdraw_confirmation(message, state)
-
-
 @router.message(WithdrawStates.uploading_screenshot, F.text)
-async def handle_text_instead_of_photo(message: Message, state: FSMContext):
-    """Handle text input when photo is expected."""
-    # User sent text instead of photo, remind them
+async def handle_withdraw_screenshot_text(message: Message, state: FSMContext):
+    """Handle text input when photo is expected (including skip command)."""
+    # Check if user wants to skip (accept /skip, skip, Skip, SKIP, etc.)
+    if message.text and message.text.lower().strip().lstrip('/') == 'skip':
+        logger.info(f"⏭️ User {message.from_user.id} skipping screenshot upload in withdrawal flow (text: '{message.text}')")
+        await state.update_data(screenshot_file_id=None)
+        await proceed_to_withdraw_confirmation(message, state)
+        return
+    
+    # Not a skip command, ask for photo again
     await message.answer(
         "📎 Please send a photo attachment or type /skip to continue without attachment."
     )

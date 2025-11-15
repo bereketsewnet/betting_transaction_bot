@@ -47,9 +47,13 @@ async def start_deposit_flow(message: Message, state: FSMContext, api_client: AP
         active_banks = [bank for bank in banks if bank.isActive]
         logger.info(f"✅ Found {len(active_banks)} active deposit banks (filtered from {len(banks)} total)")
         
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(message.from_user.id)
+        
         if not active_banks:
             logger.error(f"❌ No deposit banks available for user {message.from_user.id}")
-            await message.answer("❌ No deposit banks available. Please contact support.")
+            error_msg = await templates.get_template("error_no_deposit_banks", lang, "❌ No deposit banks available. Please contact support.")
+            await message.answer(error_msg)
             return
         
         # Build paginated bank list
@@ -57,17 +61,18 @@ async def start_deposit_flow(message: Message, state: FSMContext, api_client: AP
         keyboard, _ = build_paginated_inline_keyboard(buttons, callback_prefix="bank:deposit")
         
         await state.set_state(DepositStates.selecting_bank)
-        await message.answer(
-            "💵 Deposit\n\nSelect a deposit bank:",
-            reply_markup=keyboard
-        )
+        deposit_title = await templates.get_template("deposit_title", lang, "💵 Deposit\n\nSelect a deposit bank:")
+        await message.answer(deposit_title, reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Error starting deposit flow: {e}")
-        await message.answer("❌ An error occurred. Please try again.")
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(message.from_user.id)
+        error_msg = await templates.get_template("error_generic", lang, "❌ An error occurred. Please try again.")
+        await message.answer(error_msg)
 
 
 @router.callback_query(F.data.startswith("bank:deposit:"), DepositStates.selecting_bank)
-async def select_deposit_bank(callback: CallbackQuery, state: FSMContext, api_client: APIClient):
+async def select_deposit_bank(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle deposit bank selection."""
     await callback.answer()
     
@@ -78,35 +83,45 @@ async def select_deposit_bank(callback: CallbackQuery, state: FSMContext, api_cl
         banks = await api_client.get_deposit_banks()
         bank = next((b for b in banks if b.id == bank_id), None)
         
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(callback.from_user.id)
+        
         if not bank:
-            await callback.message.edit_text("❌ Bank not found.")
+            error_msg = await templates.get_template("error_bank_not_found", lang, "❌ Bank not found.")
+            await callback.message.edit_text(error_msg)
             return
         
         # Store bank selection
         await state.update_data(deposit_bank_id=bank_id, bank=bank.dict())
         
         # Show bank details and amount selection
-        templates = TextTemplates(api_client)
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(callback.from_user.id)
         bank_details = templates.format_bank_details(bank.dict())
         
         keyboard = build_amount_quick_replies()
         await state.set_state(DepositStates.entering_amount)
+        amount_msg = await templates.get_template("deposit_enter_amount", lang, "Enter the deposit amount:")
         await callback.message.edit_text(
-            f"{bank_details}\n\n"
-            f"Enter the deposit amount:",
+            f"{bank_details}\n\n{amount_msg}",
             reply_markup=keyboard
         )
     except Exception as e:
         logger.error(f"Error selecting deposit bank: {e}")
-        await callback.message.edit_text("❌ An error occurred. Please try again.")
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(callback.from_user.id)
+        error_msg = await templates.get_template("error_generic", lang, "❌ An error occurred. Please try again.")
+        await callback.message.edit_text(error_msg)
 
 
 @router.callback_query(F.data.startswith("amount:"), DepositStates.entering_amount)
-async def select_amount(callback: CallbackQuery, state: FSMContext, api_client: APIClient):
+async def select_amount(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle amount selection."""
     await callback.answer()
     
     amount_data = callback.data.split(":", 1)[1]
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(callback.from_user.id)
     
     if amount_data == "custom":
         # Get bank details from state to show them again
@@ -114,61 +129,63 @@ async def select_amount(callback: CallbackQuery, state: FSMContext, api_client: 
         bank = data.get("bank", {})
         
         # Format bank details
-        from app.utils.text_templates import TextTemplates
-        templates = TextTemplates(api_client)
         bank_details = templates.format_bank_details(bank)
         
         await state.set_state(DepositStates.entering_amount)
+        amount_msg = await templates.get_template("deposit_enter_amount", lang, "Enter custom amount (e.g., 150.50):")
         await callback.message.edit_text(
-            f"{bank_details}\n\n"
-            f"Enter custom amount (e.g., 150.50):",
+            f"{bank_details}\n\n{amount_msg}",
             reply_markup=build_back_keyboard()
         )
     else:
         try:
             amount = float(amount_data)
             await state.update_data(amount=amount)
-            await proceed_to_betting_site(callback.message, state, api_client)
+            await proceed_to_betting_site(callback.message, state, api_client, storage)
         except ValueError:
-            await callback.message.edit_text("❌ Invalid amount. Please try again.")
+            error_msg = await templates.get_template("error_invalid_amount", lang, "❌ Invalid amount. Please try again.")
+            await callback.message.edit_text(error_msg)
 
 
 @router.message(DepositStates.entering_amount, F.text)
-async def process_amount(message: Message, state: FSMContext, api_client: APIClient):
+async def process_amount(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Process custom amount input."""
     # Get bank details from state to show them
     data = await state.get_data()
     bank = data.get("bank", {})
     
     # Format bank details
-    from app.utils.text_templates import TextTemplates
-    templates = TextTemplates(api_client)
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
     bank_details = templates.format_bank_details(bank)
     
     is_valid, amount, error = validate_amount(message.text)
     
     if not is_valid:
-        await message.answer(
-            f"{bank_details}\n\n"
-            f"❌ {error}. Please try again:"
-        )
+        error_msg = await templates.get_template("error_invalid_amount", lang, f"❌ {error}. Please try again:")
+        await message.answer(f"{bank_details}\n\n{error_msg}")
         return
     
     await state.update_data(amount=amount)
-    await proceed_to_betting_site(message, state, api_client)
+    await proceed_to_betting_site(message, state, api_client, storage)
 
 
-async def proceed_to_betting_site(message_or_callback, state: FSMContext, api_client: APIClient):
+async def proceed_to_betting_site(message_or_callback, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Proceed to betting site selection."""
     try:
         # Get amount from state
         data = await state.get_data()
         amount = data.get("amount", 0)
         
+        templates = TextTemplates(api_client, storage)
+        telegram_id = message_or_callback.from_user.id if hasattr(message_or_callback, 'from_user') else message_or_callback.message.from_user.id
+        lang = await templates.get_user_language(telegram_id)
+        
         betting_sites = await api_client.get_betting_sites(is_active=True)
         
         if not betting_sites:
-            await message_or_callback.answer("❌ No betting sites available.")
+            error_msg = await templates.get_template("error_no_betting_sites", lang, "❌ No betting sites available.")
+            await message_or_callback.answer(error_msg)
             return
         
         buttons = [(site.name, f"site:{site.id}") for site in betting_sites]
@@ -176,25 +193,24 @@ async def proceed_to_betting_site(message_or_callback, state: FSMContext, api_cl
         
         await state.set_state(DepositStates.selecting_betting_site)
         
+        site_msg = await templates.get_template("deposit_select_betting_site", lang, "Select a betting site:")
+        message_text = f"✅ Amount: ETB {amount:.2f}\n\n{site_msg}"
+        
         if isinstance(message_or_callback, Message):
-            await message_or_callback.answer(
-                f"✅ Amount: ETB {amount:.2f}\n\n"
-                f"Select a betting site:",
-                reply_markup=keyboard
-            )
+            await message_or_callback.answer(message_text, reply_markup=keyboard)
         else:
-            await message_or_callback.message.edit_text(
-                f"✅ Amount: ETB {amount:.2f}\n\n"
-                f"Select a betting site:",
-                reply_markup=keyboard
-            )
+            await message_or_callback.message.edit_text(message_text, reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Error getting betting sites: {e}")
-        await message_or_callback.answer("❌ An error occurred. Please try again.")
+        templates = TextTemplates(api_client, storage)
+        telegram_id = message_or_callback.from_user.id if hasattr(message_or_callback, 'from_user') else message_or_callback.message.from_user.id
+        lang = await templates.get_user_language(telegram_id)
+        error_msg = await templates.get_template("error_generic", lang, "❌ An error occurred. Please try again.")
+        await message_or_callback.answer(error_msg)
 
 
 @router.callback_query(F.data.startswith("site:"), DepositStates.selecting_betting_site)
-async def select_betting_site(callback: CallbackQuery, state: FSMContext):
+async def select_betting_site(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle betting site selection."""
     await callback.answer()
     
@@ -202,61 +218,67 @@ async def select_betting_site(callback: CallbackQuery, state: FSMContext):
     await state.update_data(betting_site_id=site_id)
     await state.set_state(DepositStates.entering_player_site_id)
     
-    await callback.message.edit_text(
-        "Enter your Player Site ID (your username/ID on the betting site):",
-        reply_markup=build_back_keyboard()
-    )
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(callback.from_user.id)
+    player_id_msg = await templates.get_template("deposit_enter_player_site_id", lang, "Enter your Player Site ID (your username/ID on the betting site):")
+    await callback.message.edit_text(player_id_msg, reply_markup=build_back_keyboard())
 
 
 @router.message(DepositStates.entering_player_site_id, F.text)
-async def process_player_site_id(message: Message, state: FSMContext):
+async def process_player_site_id(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Process player site ID input."""
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
+    
     is_valid, error = validate_player_site_id(message.text)
     
     if not is_valid:
-        await message.answer(f"❌ {error}. Please try again:")
+        error_msg = await templates.get_template("error_invalid_player_site_id", lang, f"❌ {error}. Please try again:")
+        await message.answer(error_msg)
         return
     
     await state.update_data(player_site_id=message.text.strip())
     await state.set_state(DepositStates.uploading_screenshot)
     
-    await message.answer(
-        "📎 Add attachment (optional):\n\n"
-        "Send a photo or type /skip to continue without attachment."
-    )
+    screenshot_msg = await templates.get_template("deposit_upload_screenshot", lang, "📎 Add attachment (optional):\n\nSend a photo or type /skip to continue without attachment.")
+    await message.answer(screenshot_msg)
 
 
 @router.message(DepositStates.uploading_screenshot, F.photo)
-async def process_screenshot(message: Message, state: FSMContext):
+async def process_screenshot(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Process screenshot upload."""
     # Photo will be downloaded in confirmation handler
     # For now, store file_id
     photo: PhotoSize = message.photo[-1]  # Get largest photo
     await state.update_data(screenshot_file_id=photo.file_id)
-    await proceed_to_confirmation(message, state)
-
-
-@router.message(DepositStates.uploading_screenshot, F.text == "/skip")
-async def skip_screenshot(message: Message, state: FSMContext):
-    """Skip screenshot upload."""
-    logger.info(f"⏭️ User {message.from_user.id} skipping screenshot upload in deposit flow")
-    await state.update_data(screenshot_file_id=None)
-    await proceed_to_confirmation(message, state)
+    await proceed_to_confirmation(message, state, api_client, storage)
 
 
 @router.message(DepositStates.uploading_screenshot, F.text)
-async def handle_text_instead_of_photo(message: Message, state: FSMContext):
-    """Handle text input when photo is expected."""
-    # User sent text instead of photo, remind them
-    await message.answer(
-        "📎 Please send a photo attachment or type /skip to continue without attachment."
-    )
+async def handle_screenshot_text(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Handle text input when photo is expected (including skip command)."""
+    # Check if user wants to skip (accept /skip, skip, Skip, SKIP, etc.)
+    if message.text and message.text.lower().strip().lstrip('/') == 'skip':
+        logger.info(f"⏭️ User {message.from_user.id} skipping screenshot upload in deposit flow (text: '{message.text}')")
+        await state.update_data(screenshot_file_id=None)
+        await proceed_to_confirmation(message, state, api_client, storage)
+        return
+    
+    # Not a skip command, ask for photo again
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
+    screenshot_msg = await templates.get_template("deposit_upload_screenshot", lang, "📎 Please send a photo attachment or type /skip to continue without attachment.")
+    await message.answer(screenshot_msg)
 
 
-async def proceed_to_confirmation(message: Message, state: FSMContext):
+async def proceed_to_confirmation(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Proceed to confirmation step."""
     data = await state.get_data()
     
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
+    
+    confirm_template = await templates.get_template("deposit_confirm", lang, "Please confirm your deposit:")
     summary = f"""
 📋 Transaction Summary
 
@@ -267,7 +289,7 @@ Betting Site ID: {data.get('betting_site_id')}
 Player Site ID: {data.get('player_site_id')}
 Screenshot: {'Yes' if data.get('screenshot_file_id') else 'No'}
 
-Please confirm to proceed:
+{confirm_template}
     """
     
     keyboard = build_confirmation_keyboard()
@@ -322,12 +344,17 @@ async def confirm_deposit(callback: CallbackQuery, state: FSMContext, bot, api_c
             await file_service.cleanup_file(screenshot_path)
         
         # Show success message
-        await callback.message.edit_text(
-            f"✅ Deposit transaction created successfully!\n\n"
-            f"Transaction UUID: {transaction.transaction.transactionUuid}\n"
-            f"Status: {transaction.transaction.status}\n\n"
-            f"You will be notified when the transaction is processed."
-        )
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        created_msg = await templates.get_template("transaction_created", lang, "✅ Your transaction has been created successfully!")
+        processed_msg = await templates.get_template("transaction_processed", lang, "You will be notified when the transaction is processed.")
+        
+        success_text = created_msg.replace("{transaction_uuid}", transaction.transaction.transactionUuid)
+        success_text += f"\n\nTransaction UUID: {transaction.transaction.transactionUuid}\n"
+        success_text += f"Status: {transaction.transaction.status}\n\n"
+        success_text += processed_msg
+        
+        await callback.message.edit_text(success_text)
         
         await state.clear()
         

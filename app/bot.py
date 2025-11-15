@@ -23,14 +23,15 @@ from app.handlers import start, main_menu, deposit_flow, withdraw_flow, history,
 async def setup_handlers(dp: Dispatcher, api_client: APIClient, storage):
     """Register all handlers."""
     # Register routers
-    # Register agent_menu before admin_menu to handle shared button texts first
-    dp.include_router(start.router)
-    dp.include_router(main_menu.router)
-    dp.include_router(deposit_flow.router)
-    dp.include_router(withdraw_flow.router)
+    # Register flow handlers (with state filters) FIRST so they have priority
+    dp.include_router(start.router)  # Has LoginStates, RegistrationStates
+    dp.include_router(deposit_flow.router)  # Has DepositStates
+    dp.include_router(withdraw_flow.router)  # Has WithdrawStates
     dp.include_router(history.router)
     dp.include_router(inline_lists.router)
     dp.include_router(callbacks.router)
+    # Register menu handlers AFTER flow handlers
+    dp.include_router(main_menu.router)
     dp.include_router(agent_menu.router)  # Register before admin_menu
     dp.include_router(admin_menu.router)
 

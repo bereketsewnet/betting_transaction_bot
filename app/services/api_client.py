@@ -111,6 +111,11 @@ class APIClient:
         response = await self._request("GET", f"config/welcome", params={"lang": lang})
         return WelcomeResponse(**response.json())
     
+    async def get_template(self, key: str, lang: str = "en") -> Dict[str, Any]:
+        """Get template by key and language (with fallback to English)."""
+        response = await self._request("GET", "config/template", params={"key": key, "lang": lang})
+        return response.json()
+    
     async def get_deposit_banks(self) -> List[DepositBank]:
         """Get deposit banks."""
         response = await self._request("GET", "config/deposit-banks")

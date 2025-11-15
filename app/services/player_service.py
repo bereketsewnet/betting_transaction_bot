@@ -25,6 +25,9 @@ class PlayerService:
         # Check if we already have a player UUID
         player_uuid = await self.storage.get_player_uuid(telegram_id)
         if player_uuid:
+            # Player exists, but always update language when provided
+            await self.storage.set_language(telegram_id, language_code)
+            logger.info(f"Updated language to {language_code} for existing player {player_uuid}")
             return player_uuid
         
         # Create new guest player

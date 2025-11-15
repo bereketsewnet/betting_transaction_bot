@@ -1,23 +1,63 @@
 """Text templates for bot messages."""
-from typing import Optional
+from typing import Optional, Dict, Any
 from app.services.api_client import APIClient
+from app.storage import StorageInterface
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TextTemplates:
     """Text template manager."""
     
-    def __init__(self, api_client: APIClient):
+    def __init__(self, api_client: APIClient, storage: Optional[StorageInterface] = None):
         self.api_client = api_client
+        self.storage = storage
+    
+    async def get_template(self, key: str, language_code: str = "en", default: str = "") -> str:
+        """
+        Get template by key and language code.
+        Falls back to English if template not found for requested language.
+        Falls back to default string if English template also not found.
+        
+        Args:
+            key: Template key name
+            language_code: Language code (e.g., 'en', 'am')
+            default: Default text to return if template not found
+        
+        Returns:
+            Template content or default string
+        """
+        try:
+            response = await self.api_client.get_template(key, language_code)
+            content = response.get("content", "")
+            # Return content if available, otherwise return default
+            return content.strip() if content else default
+        except Exception as e:
+            logger.warning(f"Failed to get template '{key}' for language '{language_code}': {e}")
+            # If requested language is not English, try English fallback
+            if language_code != "en":
+                try:
+                    response = await self.api_client.get_template(key, "en")
+                    content = response.get("content", "")
+                    if content:
+                        logger.info(f"Using English fallback for template '{key}'")
+                        return content.strip()
+                except Exception:
+                    pass
+            # Return default if all else fails
+            return default
     
     async def get_welcome_message(self, language_code: str = "en") -> str:
         """Get welcome message from API."""
-        try:
-            response = await self.api_client.get_welcome(language_code)
-            # Return empty string if message is empty or just whitespace
-            return response.message.strip() if response.message else ""
-        except Exception:
-            # Return empty string instead of fallback message
-            return ""
+        return await self.get_template("welcome_message", language_code, "")
+    
+    async def get_user_language(self, telegram_id: int) -> str:
+        """Get user's language code from storage, default to 'en'."""
+        if self.storage:
+            lang = await self.storage.get_language(telegram_id)
+            return lang if lang else "en"
+        return "en"
     
     @staticmethod
     def format_transaction_details(transaction: dict) -> str:

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from app.services.api_client import APIClient
 from app.storage import StorageInterface
+from app.utils.text_templates import TextTemplates
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,17 @@ async def show_agent_menu(message: Message, state: FSMContext, api_client: APICl
     # Check if URL is valid for Telegram Web Apps (HTTPS + not localhost)
     can_use_mini_app = is_valid_web_app_url(web_app_url)
     
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    
+    # Get button texts from templates
+    button_my_tx = await templates.get_template("button_my_transactions", lang, "📋 My Transactions")
+    button_recent = await templates.get_template("button_recent_24h", lang, "🕐 Recent (24h)")
+    button_by_date = await templates.get_template("button_by_date", lang, "📅 By Date")
+    button_my_stats = await templates.get_template("button_my_stats", lang, "📊 My Stats")
+    button_open_browser = await templates.get_template("button_open_browser", lang, "🌐 Open in Browser")
+    button_logout = await templates.get_template("button_logout", lang, "🚪 Logout")
+    
     # Build first row: mini app button (if valid) + My Transactions
     if can_use_mini_app:
         # Mini app button (web_app) - appears on left side
@@ -45,92 +57,141 @@ async def show_agent_menu(message: Message, state: FSMContext, api_client: APICl
             text="📱 Open App",
             web_app=WebAppInfo(url=web_app_url)
         )
-        first_row = [mini_app_button, KeyboardButton(text="📋 My Transactions")]
+        first_row = [mini_app_button, KeyboardButton(text=button_my_tx)]
     else:
         # Skip mini app button if URL is invalid (HTTP or localhost), just show My Transactions
-        first_row = [KeyboardButton(text="📋 My Transactions")]
+        first_row = [KeyboardButton(text=button_my_tx)]
     
     # Use reply keyboard for better UX (like admin menu)
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             first_row,
-            [KeyboardButton(text="🕐 Recent (24h)")],
-            [KeyboardButton(text="📅 By Date")],
-            [KeyboardButton(text="📊 My Stats")],
-            [KeyboardButton(text="🌐 Open in Browser")],
-            [KeyboardButton(text="🚪 Logout")],
+            [KeyboardButton(text=button_recent)],
+            [KeyboardButton(text=button_by_date)],
+            [KeyboardButton(text=button_my_stats)],
+            [KeyboardButton(text=button_open_browser)],
+            [KeyboardButton(text=button_logout)],
         ],
         resize_keyboard=True
     )
     
-    await message.answer(
-        "👤 Agent Panel\n\n"
-        "Select an option:",
-        reply_markup=keyboard
-    )
+    agent_title = await templates.get_template("agent_menu_title", lang, "👤 Agent Panel\n\nSelect an option:")
+    await message.answer(agent_title, reply_markup=keyboard)
 
 
-@router.message(F.text == "📋 My Transactions")
+@router.message(F.text)
 async def cmd_my_transactions(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle My Transactions button."""
+    """Handle My Transactions button (works with both English and translated text)."""
+    # Don't process if user is in a flow state (deposit, withdraw, login, registration)
+    current_state = await state.get_state()
+    if current_state and any(current_state.startswith(prefix) for prefix in ["DepositStates:", "WithdrawStates:", "LoginStates:", "RegistrationStates:"]):
+        return  # Let state-specific handlers process it
+    
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     if user_role != "agent":
-        await message.answer("❌ Agent access required.")
-        return
+        return  # Not an agent, let other handlers process it
     
-    await show_my_transactions_for_message(message, state, api_client, storage)
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    button_my_tx = await templates.get_template("button_my_transactions", lang, "📋 My Transactions")
+    
+    # Check if the message text matches the button (works for both English and translated)
+    if message.text == button_my_tx or message.text == "📋 My Transactions":
+        await show_my_transactions_for_message(message, state, api_client, storage)
 
 
-@router.message(F.text == "🕐 Recent (24h)")
+@router.message(F.text)
 async def cmd_recent_transactions(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle Recent (24h) button - works for both admin and agent."""
+    """Handle Recent (24h) button - works for both admin and agent (works with both English and translated text)."""
+    # Don't process if user is in a flow state (deposit, withdraw, login, registration)
+    current_state = await state.get_state()
+    if current_state and any(current_state.startswith(prefix) for prefix in ["DepositStates:", "WithdrawStates:", "LoginStates:", "RegistrationStates:"]):
+        return  # Let state-specific handlers process it
+    
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     
-    if user_role == "agent":
-        # Call agent function
-        await show_recent_transactions_for_message(message, state, api_client, storage)
-    elif user_role == "admin":
-        # Route to admin handler
-        from app.handlers.admin_menu import show_recent_transactions_for_message as admin_show_recent
-        await admin_show_recent(message, state, api_client, storage)
-    else:
-        await message.answer("❌ Please login as admin or agent to use this feature.")
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    button_recent = await templates.get_template("button_recent_24h", lang, "🕐 Recent (24h)")
+    
+    # Check if the message text matches the button (works for both English and translated)
+    if message.text == button_recent or message.text == "🕐 Recent (24h)":
+        if user_role == "agent":
+            # Call agent function
+            await show_recent_transactions_for_message(message, state, api_client, storage)
+        elif user_role == "admin":
+            # Route to admin handler
+            from app.handlers.admin_menu import show_recent_transactions_for_message as admin_show_recent
+            await admin_show_recent(message, state, api_client, storage)
+        else:
+            error_msg = await templates.get_template("error_admin_access_required", lang, "❌ Please login as admin or agent to use this feature.")
+            await message.answer(error_msg)
 
 
-@router.message(F.text == "📅 By Date")
+@router.message(F.text)
 async def cmd_by_date(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle By Date button - works for both admin and agent."""
+    """Handle By Date button - works for both admin and agent (works with both English and translated text)."""
+    # Don't process if user is in a flow state (deposit, withdraw, login, registration)
+    current_state = await state.get_state()
+    if current_state and any(current_state.startswith(prefix) for prefix in ["DepositStates:", "WithdrawStates:", "LoginStates:", "RegistrationStates:"]):
+        return  # Let state-specific handlers process it
+    
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
     
-    if user_role == "agent":
-        # Call agent function
-        await request_date_for_message(message, state)
-    elif user_role == "admin":
-        # Route to admin handler
-        from app.handlers.admin_menu import request_date_for_message as admin_request_date
-        await admin_request_date(message, state)
-    else:
-        await message.answer("❌ Please login as admin or agent to use this feature.")
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    button_by_date = await templates.get_template("button_by_date", lang, "📅 By Date")
+    
+    # Check if the message text matches the button (works for both English and translated)
+    if message.text == button_by_date or message.text == "📅 By Date":
+        if user_role == "agent":
+            # Call agent function
+            await request_date_for_message(message, state, templates, lang)
+        elif user_role == "admin":
+            # Route to admin handler
+            from app.handlers.admin_menu import request_date_for_message as admin_request_date
+            await admin_request_date(message, state, templates, lang)
+        else:
+            error_msg = await templates.get_template("error_admin_access_required", lang, "❌ Please login as admin or agent to use this feature.")
+            await message.answer(error_msg)
 
 
-@router.message(F.text == "📊 My Stats")
+@router.message(F.text)
 async def cmd_my_stats(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle My Stats button."""
+    """Handle My Stats button (works with both English and translated text)."""
+    # Don't process if user is in a flow state (deposit, withdraw, login, registration)
+    current_state = await state.get_state()
+    if current_state and any(current_state.startswith(prefix) for prefix in ["DepositStates:", "WithdrawStates:", "LoginStates:", "RegistrationStates:"]):
+        return  # Let state-specific handlers process it
+    
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
-    if user_role != "agent":
-        await message.answer("❌ Agent access required.")
-        return
     
-    await show_agent_stats(message, state, api_client, storage)
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    button_my_stats = await templates.get_template("button_my_stats", lang, "📊 My Stats")
+    
+    # Check if the message text matches the button (works for both English and translated)
+    if message.text == button_my_stats or message.text == "📊 My Stats":
+        if user_role != "agent":
+            error_msg = await templates.get_template("error_agent_access_required", lang, "❌ Agent access required.")
+            await message.answer(error_msg)
+            return
+        
+        await show_agent_stats(message, state, api_client, storage)
 
 
-@router.message(F.text == "🌐 Open in Browser")
-async def cmd_agent_web_app(message: Message, api_client: APIClient, storage: StorageInterface):
-    """Handle web app redirect to browser for agent."""
+@router.message(F.text)
+async def cmd_agent_web_app(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Handle web app redirect to browser for agent (works with both English and translated text)."""
+    # Don't process if user is in a flow state (deposit, withdraw, login, registration)
+    current_state = await state.get_state()
+    if current_state and any(current_state.startswith(prefix) for prefix in ["DepositStates:", "WithdrawStates:", "LoginStates:", "RegistrationStates:"]):
+        return  # Let state-specific handlers process it
+    
     from app.utils.keyboards import get_browser_url
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
@@ -139,29 +200,45 @@ async def cmd_agent_web_app(message: Message, api_client: APIClient, storage: St
     if user_role != "agent":
         return  # Don't answer, let other handlers process it
     
-    # Agent gets base URL only (no player ID)
-    web_url = get_browser_url(player_uuid=None, user_role="agent")
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    button_open_browser = await templates.get_template("button_open_browser", lang, "🌐 Open in Browser")
     
-    # Create inline keyboard with URL button (opens in browser)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Open in Browser", url=web_url)]
-    ])
-    
-    await message.answer(
-        f"🌐 Web App\n\n"
-        f"Click the button below to open the web app in your browser:",
-        reply_markup=keyboard
-    )
+    # Check if the message text matches the button (works for both English and translated)
+    if message.text == button_open_browser or message.text == "🌐 Open in Browser":
+        # Agent gets base URL only (no player ID)
+        web_url = get_browser_url(player_uuid=None, user_role="agent")
+        
+        # Create inline keyboard with URL button (opens in browser)
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=button_open_browser, url=web_url)]
+        ])
+        
+        web_app_msg = await templates.get_template("web_app_description", lang, "🌐 Web App\n\nClick the button below to open the web app in your browser:")
+        await message.answer(web_app_msg, reply_markup=keyboard)
 
 
-@router.message(F.text == "🚪 Logout")
+@router.message(F.text)
 async def cmd_agent_logout(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
-    """Handle agent logout button."""
+    """Handle agent logout button (works with both English and translated text)."""
+    # Don't process if user is in a flow state (deposit, withdraw, login, registration)
+    current_state = await state.get_state()
+    if current_state and any(current_state.startswith(prefix) for prefix in ["DepositStates:", "WithdrawStates:", "LoginStates:", "RegistrationStates:"]):
+        return  # Let state-specific handlers process it
+    
     telegram_id = message.from_user.id
     user_role = await storage.get_user_role(telegram_id)
-    if user_role != "agent":
-        await message.answer("❌ Agent access required.")
-        return
+    
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    button_logout = await templates.get_template("button_logout", lang, "🚪 Logout")
+    
+    # Check if the message text matches the button (works for both English and translated)
+    if message.text == button_logout or message.text == "🚪 Logout":
+        if user_role != "agent":
+            error_msg = await templates.get_template("error_agent_access_required", lang, "❌ Agent access required.")
+            await message.answer(error_msg)
+            return
     
     try:
         # Get access token
@@ -177,7 +254,8 @@ async def cmd_agent_logout(message: Message, state: FSMContext, api_client: APIC
         await storage.clear_admin_token(telegram_id)
         await storage.clear_user_credentials(telegram_id)
         
-        await message.answer("✅ Logged out successfully.")
+        logout_success = await templates.get_template("logout_success", lang, "✅ Logged out successfully.")
+        await message.answer(logout_success)
         await state.clear()
         
         # Return to start
@@ -186,7 +264,10 @@ async def cmd_agent_logout(message: Message, state: FSMContext, api_client: APIC
         
     except Exception as e:
         logger.error(f"Error during agent logout: {e}")
-        await message.answer("❌ Error during logout. Please try again.")
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        error_msg = await templates.get_template("error_generic", lang, "❌ Error during logout. Please try again.")
+        await message.answer(error_msg)
 
 
 async def show_my_transactions_for_message(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
@@ -376,15 +457,21 @@ async def show_recent_transactions_for_message(message: Message, state: FSMConte
         )
 
 
-async def request_date_for_message(message: Message, state: FSMContext):
+async def request_date_for_message(message: Message, state: FSMContext, templates: TextTemplates = None, lang: str = "en"):
     """Request date for filtering transactions (from text message)."""
+    if templates is None:
+        from app.utils.text_templates import TextTemplates
+        # This shouldn't happen, but provide fallback
+        templates = TextTemplates(None, None)
+        lang = "en"
+    
     await state.set_state(AgentTransactionStates.entering_date)
+    button_back = await templates.get_template("button_back", lang, "🔙 Back")
+    filter_msg = await templates.get_template("admin_filter_by_date", lang, "📅 Filter by Date\n\nPlease enter the date (YYYY-MM-DD):\nExample: 2025-11-08")
     await message.answer(
-        "📅 Filter by Date\n\n"
-        "Please enter the date (YYYY-MM-DD):\n"
-        "Example: 2025-11-08",
+        filter_msg,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Back", callback_data="agent:back")]
+            [InlineKeyboardButton(text=button_back, callback_data="agent:back")]
         ])
     )
 

@@ -38,31 +38,38 @@ async def cmd_start(message: Message, state: FSMContext, api_client: APIClient, 
     await state.clear()
     
     try:
+        # Get user's language (default to 'en' for initial message)
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(message.from_user.id)
+        
         # Get available languages
         languages = await api_client.get_languages()
         active_languages = [lang for lang in languages if lang.isActive]
         
         if not active_languages:
-            await message.answer("No languages available. Please contact support.")
+            error_msg = await templates.get_template("error_no_languages", lang, "No languages available. Please contact support.")
+            await message.answer(error_msg)
             return
         
         # Build language selection keyboard
         buttons = [(lang.name, f"lang:{lang.code}") for lang in active_languages]
         keyboard = build_inline_keyboard(buttons, row_width=2)
         
-        await message.answer(
-            "👋 Welcome! Please select your preferred language:",
-            reply_markup=keyboard
-        )
+        # Get language selection message from template
+        lang_selection_msg = await templates.get_template("start_language_selection", lang, "👋 Welcome! Please select your preferred language:")
+        await message.answer(lang_selection_msg, reply_markup=keyboard)
     except Exception as e:
         logger.error(f"❌ Error in /start for user {message.from_user.id}: {e}", exc_info=True)
         logger.error(f"   Error type: {type(e).__name__}")
         logger.error(f"   Error details: {str(e)[:200]}")
-        await message.answer(
-            f"❌ An error occurred while starting the bot.\n\n"
-            f"Error: {type(e).__name__}\n"
-            f"Please try again or contact support."
-        )
+        
+        # Get error message from template
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(message.from_user.id)
+        error_msg = await templates.get_template("error_start_failed", lang, 
+            f"❌ An error occurred while starting the bot.\n\nError: {type(e).__name__}\nPlease try again or contact support.")
+        error_msg = error_msg.replace("{error_type}", type(e).__name__)
+        await message.answer(error_msg)
 
 
 @router.callback_query(F.data.startswith("lang:"))
@@ -84,23 +91,29 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
             language_code=language_code,
         )
         
-        # Get welcome message (optional - can be empty if user has their own)
-        templates = TextTemplates(api_client)
+        # Get templates with user's language
+        templates = TextTemplates(api_client, storage)
         welcome_text = await templates.get_welcome_message(language_code)
+        
+        # Get button texts from templates
+        button_register = await templates.get_template("button_register", language_code, "📝 Register")
+        button_login = await templates.get_template("button_login", language_code, "🔐 Login")
+        button_guest = await templates.get_template("button_continue_guest", language_code, "👤 Continue as Guest")
+        what_to_do = await templates.get_template("start_what_to_do", language_code, "What would you like to do?")
         
         # Show registration options
         buttons = [
-            ("📝 Register", "auth:register"),
-            ("🔐 Login", "auth:login"),
-            ("👤 Continue as Guest", "auth:guest"),
+            (button_register, "auth:register"),
+            (button_login, "auth:login"),
+            (button_guest, "auth:guest"),
         ]
         keyboard = build_inline_keyboard(buttons, row_width=1)
         
         # Only show welcome text if it's not empty, otherwise just show the question
         if welcome_text and welcome_text.strip():
-            message_text = f"{welcome_text}\n\nWhat would you like to do?"
+            message_text = f"{welcome_text}\n\n{what_to_do}"
         else:
-            message_text = "What would you like to do?"
+            message_text = what_to_do
         
         await callback.message.edit_text(
             message_text,
@@ -108,7 +121,10 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
         )
     except Exception as e:
         logger.error(f"Error in language selection: {e}", exc_info=True)
-        await callback.message.edit_text("❌ An error occurred. Please try again.")
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        error_msg = await templates.get_template("error_generic", lang, "❌ An error occurred. Please try again.")
+        await callback.message.edit_text(error_msg)
 
 
 @router.callback_query(F.data == "auth:guest")
@@ -130,11 +146,11 @@ async def continue_as_guest(callback: CallbackQuery, state: FSMContext, api_clie
             language_code=language_code,
         )
         
-        await callback.message.edit_text(
-            "✅ You are now using the bot as a guest.\n\n"
-            "You can make transactions, but some features may be limited.\n"
-            "To access all features, please register."
-        )
+        # Get guest success message from template
+        templates = TextTemplates(api_client, storage)
+        guest_msg = await templates.get_template("guest_created_success", language_code,
+            "✅ You are now using the bot as a guest.\n\nYou can make transactions, but some features may be limited.\nTo access all features, please register.")
+        await callback.message.edit_text(guest_msg)
         
         # Import here to avoid circular import
         from app.handlers.main_menu import show_main_menu
@@ -142,14 +158,20 @@ async def continue_as_guest(callback: CallbackQuery, state: FSMContext, api_clie
         
     except Exception as e:
         logger.error(f"Error creating guest player: {e}")
-        await callback.message.edit_text("❌ Failed to create guest account. Please try again.")
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        error_msg = await templates.get_template("error_generic", lang, "❌ Failed to create guest account. Please try again.")
+        await callback.message.edit_text(error_msg)
 
 
 @router.callback_query(F.data == "auth:login")
-async def start_login(callback: CallbackQuery, state: FSMContext, storage: StorageInterface):
+async def start_login(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Start login flow."""
     telegram_id = callback.from_user.id
     logger.info(f"User {telegram_id} started login")
+    
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
     
     # Check if user already has credentials stored (already logged in)
     is_logged_in = await storage.is_user_logged_in(telegram_id)
@@ -160,9 +182,10 @@ async def start_login(callback: CallbackQuery, state: FSMContext, storage: Stora
         
         # Use inline keyboard to allow switching accounts
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        button_cancel = await templates.get_template("button_cancel", lang, "❌ Cancel")
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Login with Another Account", callback_data="auth:login_switch")],
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="auth:cancel")]
+            [InlineKeyboardButton(text=button_cancel, callback_data="auth:cancel")]
         ])
         
         await callback.message.edit_text(
@@ -175,20 +198,23 @@ async def start_login(callback: CallbackQuery, state: FSMContext, storage: Stora
     
     await callback.answer()
     await state.set_state(LoginStates.waiting_for_username)
-    await callback.message.edit_text(
-        "🔐 Login\n\n"
-        "Please enter your email address:"
-    )
+    login_msg = await templates.get_template("login_enter_username", lang, "🔐 Login\n\nPlease enter your username (email):")
+    await callback.message.edit_text(login_msg)
 
 
 @router.message(LoginStates.waiting_for_username, F.text)
-async def process_login_username(message: Message, state: FSMContext):
+async def process_login_username(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Process login username input."""
     logger.info(f"📧 User {message.from_user.id} entered username for login")
     username = message.text.strip()
+    
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
+    
     if not username or len(username) < 3:
         logger.warning(f"❌ Invalid username length from user {message.from_user.id}: {len(username)}")
-        await message.answer("❌ Email must be at least 3 characters. Please try again:")
+        error_msg = await templates.get_template("error_validation_failed", lang, "❌ Email must be at least 3 characters. Please try again:")
+        await message.answer(error_msg)
         return
     
     logger.info(f"✅ Username saved for user {message.from_user.id}, requesting password")
@@ -197,7 +223,8 @@ async def process_login_username(message: Message, state: FSMContext):
     new_state = await state.get_state()
     logger.info(f"   State set to: {new_state}")
     logger.info(f"   Expected state: {LoginStates.waiting_for_password}")
-    await message.answer("🔒 Please enter your password:")
+    password_msg = await templates.get_template("login_enter_password", lang, "Please enter your password:")
+    await message.answer(password_msg)
 
 
 @router.message(LoginStates.waiting_for_password, F.text)
@@ -211,13 +238,18 @@ async def process_login_password(message: Message, state: FSMContext, api_client
     if api_client is None or storage is None:
         logger.error(f"❌ Dependencies missing in password handler for user {message.from_user.id}")
         logger.error(f"   api_client: {api_client}, storage: {storage}")
+        # Can't use templates here since api_client might be None, use hardcoded fallback
         await message.answer("❌ System error. Please restart with /start")
         return
     
     password = message.text.strip()
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
+    
     if not password or len(password) < 8:
         logger.warning(f"❌ Invalid password length from user {message.from_user.id}: {len(password)}")
-        await message.answer("❌ Password must be at least 8 characters. Please try again:")
+        error_msg = await templates.get_template("error_validation_failed", lang, "❌ Password must be at least 8 characters. Please try again:")
+        await message.answer(error_msg)
         return
     
     data = await state.get_data()
@@ -226,16 +258,21 @@ async def process_login_password(message: Message, state: FSMContext, api_client
     
     logger.info(f"📊 State data for user {telegram_id}: {list(data.keys())}")
     
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(telegram_id)
+    
     if "username" not in data:
         logger.error(f"❌ No username in state data for user {telegram_id}")
-        await message.answer("❌ Session expired. Please start again with /start")
+        error_msg = await templates.get_template("error_generic", lang, "❌ Session expired. Please start again with /start")
+        await message.answer(error_msg)
         await state.clear()
         return
     
     username = data.get("username", "").strip()
     if not username:
         logger.error(f"❌ Empty username in state data for user {telegram_id}")
-        await message.answer("❌ Username is missing. Please start again with /start")
+        error_msg = await templates.get_template("error_generic", lang, "❌ Username is missing. Please start again with /start")
+        await message.answer(error_msg)
         await state.clear()
         return
     
@@ -303,9 +340,10 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             
             # Delete processing message and show success
             await processing_msg.delete()
-            await message.answer(
-                "✅ Admin login successful! Welcome to Admin Panel!"
-            )
+            templates = TextTemplates(api_client, storage)
+            lang = await templates.get_user_language(telegram_id)
+            admin_success = await templates.get_template("admin_redirect_message", lang, "✅ Admin login successful! Welcome to Admin Panel!")
+            await message.answer(admin_success)
             await state.clear()
             
             # Show admin menu (with error handling for web app button)
@@ -315,8 +353,11 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             except Exception as menu_error:
                 logger.error(f"❌ Error showing admin menu: {menu_error}", exc_info=True)
                 # Try to show menu without web app button as fallback
+                templates = TextTemplates(api_client, storage)
+                lang = await templates.get_user_language(telegram_id)
+                admin_success = await templates.get_template("admin_redirect_message", lang, "✅ Admin login successful! Welcome to Admin Panel!")
                 await message.answer(
-                    "✅ Admin login successful! Welcome to Admin Panel!\n\n"
+                    f"{admin_success}\n\n"
                     "⚠️ Note: Mini app button is only available with HTTPS URLs.\n"
                     "Use '🌐 Open in Browser' button to access the web app."
                 )
@@ -332,7 +373,10 @@ async def process_login_password(message: Message, state: FSMContext, api_client
                     ],
                     resize_keyboard=True
                 )
-                await message.answer("👑 Admin Panel\n\nSelect an option:", reply_markup=simple_keyboard)
+                templates = TextTemplates(api_client, storage)
+                lang = await templates.get_user_language(telegram_id)
+                admin_title = await templates.get_template("admin_menu_title", lang, "👑 Admin Panel\n\nSelect an option:")
+                await message.answer(admin_title, reply_markup=simple_keyboard)
             return
         
         if is_agent:
@@ -356,9 +400,10 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             
             # Delete processing message and show success
             await processing_msg.delete()
-            await message.answer(
-                "✅ Agent login successful! Welcome to Agent Panel!"
-            )
+            templates = TextTemplates(api_client, storage)
+            lang = await templates.get_user_language(telegram_id)
+            agent_success = await templates.get_template("agent_redirect_message", lang, "✅ Agent login successful! Welcome to Agent Panel!")
+            await message.answer(agent_success)
             await state.clear()
             
             # Show agent menu (with error handling for web app button)
@@ -368,8 +413,11 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             except Exception as menu_error:
                 logger.error(f"❌ Error showing agent menu: {menu_error}", exc_info=True)
                 # Try to show menu without web app button as fallback
+                templates = TextTemplates(api_client, storage)
+                lang = await templates.get_user_language(telegram_id)
+                agent_success = await templates.get_template("agent_redirect_message", lang, "✅ Agent login successful! Welcome to Agent Panel!")
                 await message.answer(
-                    "✅ Agent login successful! Welcome to Agent Panel!\n\n"
+                    f"{agent_success}\n\n"
                     "⚠️ Note: Mini app button is only available with HTTPS URLs.\n"
                     "Use '🌐 Open in Browser' button to access the web app."
                 )
@@ -386,7 +434,10 @@ async def process_login_password(message: Message, state: FSMContext, api_client
                     ],
                     resize_keyboard=True
                 )
-                await message.answer("👤 Agent Panel\n\nSelect an option:", reply_markup=simple_keyboard)
+                templates = TextTemplates(api_client, storage)
+                lang = await templates.get_user_language(telegram_id)
+                agent_title = await templates.get_template("agent_menu_title", lang, "👤 Agent Panel\n\nSelect an option:")
+                await message.answer(agent_title, reply_markup=simple_keyboard)
             return
         
         # Regular player login - get player profile
@@ -414,9 +465,10 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             
             # Delete processing message and show success
             await processing_msg.delete()
-            await message.answer(
-                "✅ Login successful! Welcome back to Betting Payment Manager!"
-            )
+            templates = TextTemplates(api_client, storage)
+            lang = await templates.get_user_language(telegram_id)
+            login_success = await templates.get_template("login_success", lang, "✅ Login successful! Welcome back to Betting Payment Manager!")
+            await message.answer(login_success)
             await state.clear()
             
             # Show main menu
@@ -465,31 +517,33 @@ async def process_login_password(message: Message, state: FSMContext, api_client
             pass
         
         # Parse error message
-        error_msg = "❌ Login failed. "
-        error_str = str(e).lower()
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
         
+        error_str = str(e).lower()
         if "invalid credentials" in error_str or "401" in error_str:
-            error_msg += "Invalid email or password."
+            error_msg = await templates.get_template("login_failed", lang, "❌ Login failed. Invalid email or password.")
             logger.warning(f"   Invalid credentials for {data.get('username')}")
         elif "400" in error_str or "validation" in error_str:
-            error_msg += "Invalid input format."
+            error_msg = await templates.get_template("error_validation_failed", lang, "❌ Login failed. Invalid input format.")
             logger.warning(f"   Validation error for {data.get('username')}")
         elif "404" in error_str:
-            error_msg += "Account not found."
+            error_msg = await templates.get_template("error_transaction_not_found", lang, "❌ Login failed. Account not found.")
             logger.warning(f"   Account not found for {data.get('username')}")
         elif "500" in error_str or "502" in error_str or "503" in error_str:
-            error_msg += "Server error. Please try again later."
+            error_msg = await templates.get_template("error_generic", lang, "❌ Login failed. Server error. Please try again later.")
             logger.error(f"   Server error")
         elif "connection" in error_str or "timeout" in error_str:
-            error_msg += "Cannot connect to server. Please try again."
+            error_msg = await templates.get_template("error_connection_failed", lang, "❌ Login failed. Cannot connect to server. Please try again.")
             logger.error(f"   Connection error")
         else:
-            error_msg += "An error occurred. Please try again later."
+            error_msg = await templates.get_template("login_failed", lang, f"❌ Login failed. An error occurred. Please try again later.")
             logger.error(f"   Unknown error: {str(e)[:100]}")
         
         await message.answer(error_msg)
         await state.clear()
-        await message.answer("Please try /start again to login or register.")
+        retry_msg = await templates.get_template("error_generic", lang, "Please try /start again to login or register.")
+        await message.answer(retry_msg)
 
 
 @router.callback_query(F.data == "auth:login_switch")
