@@ -96,15 +96,15 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
         welcome_text = await templates.get_welcome_message(language_code)
         
         # Get button texts from templates
-        button_register = await templates.get_template("button_register", language_code, "📝 Register")
-        button_login = await templates.get_template("button_login", language_code, "🔐 Login")
+        button_phone_login = await templates.get_template("button_phone_login", language_code, "📱 Login/Register")
+        button_email_login = await templates.get_template("button_email_login", language_code, "📧 Login with Email")
         button_guest = await templates.get_template("button_continue_guest", language_code, "👤 Continue as Guest")
         what_to_do = await templates.get_template("start_what_to_do", language_code, "What would you like to do?")
         
         # Show registration options
         buttons = [
-            (button_register, "auth:register"),
-            (button_login, "auth:login"),
+            (button_phone_login, "auth:telegram"),
+            (button_email_login, "auth:login"),
             (button_guest, "auth:guest"),
         ]
         keyboard = build_inline_keyboard(buttons, row_width=1)
@@ -162,6 +162,167 @@ async def continue_as_guest(callback: CallbackQuery, state: FSMContext, api_clie
         lang = await templates.get_user_language(telegram_id)
         error_msg = await templates.get_template("error_generic", lang, "❌ Failed to create guest account. Please try again.")
         await callback.message.edit_text(error_msg)
+
+
+@router.callback_query(F.data == "auth:telegram")
+async def start_telegram_login(callback: CallbackQuery, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Start Telegram login flow (request contact)."""
+    await callback.answer()
+    
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(callback.from_user.id)
+    
+    share_text = await templates.get_template("login_share_contact", lang, "📱 Please click the button below to share your contact number for secure login/registration.")
+    button_text = await templates.get_template("button_share_contact", lang, "📱 Share Contact")
+    
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=button_text, request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    
+    # We can't edit text to show ReplyKeyboardMarkup, must send new message
+    # Delete previous message to keep chat clean
+    try:
+        await callback.message.delete()
+    except:
+        pass
+        
+    await callback.message.answer(share_text, reply_markup=keyboard)
+
+
+@router.message(F.contact)
+async def process_contact(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
+    """Process shared contact for login/registration."""
+    contact = message.contact
+    telegram_id = message.from_user.id
+    
+    # Verify contact belongs to user
+    if contact.user_id != telegram_id:
+        await message.answer("❌ Please share your own contact.")
+        return
+
+    logger.info(f"📱 Processing contact for user {telegram_id}: {contact.phone_number}")
+    
+    # Remove keyboard
+    from aiogram.types import ReplyKeyboardRemove
+    processing_msg = await message.answer("⏳ Verifying...", reply_markup=ReplyKeyboardRemove())
+    
+    try:
+        login_response = await api_client.telegram_login(
+            phone=contact.phone_number,
+            telegram_id=telegram_id,
+            first_name=contact.first_name,
+            last_name=contact.last_name,
+            username=message.from_user.username
+        )
+        
+        logger.info(f"✅ Telegram login success for user {telegram_id}")
+        
+        # Copied logic from process_login_password
+        # Get player profile using userId from login response
+        user_id = login_response.get("user", {}).get("id")
+        if not user_id:
+            logger.error(f"❌ No user.id in login response for user {telegram_id}")
+            await processing_msg.edit_text("❌ Login successful but could not get user ID. Please contact support.")
+            return
+        
+        logger.info(f"📋 Got user ID {user_id} from login response")
+        
+        # Update processing message
+        try:
+            await processing_msg.edit_text("⏳ Loading your profile...")
+        except Exception:
+            # If edit fails (e.g. "message can't be edited"), delete and send new
+            try:
+                await processing_msg.delete()
+            except:
+                pass
+            processing_msg = await message.answer("⏳ Loading your profile...")
+        
+        # Check if user is admin
+        user_data = login_response.get("user", {})
+        user_role = user_data.get("role")
+        user_role_id = user_data.get("roleId")
+        access_token = login_response.get("accessToken")
+        
+        is_admin = (user_role == "admin") or (user_role_id == config.ADMIN_ROLE_ID)
+        is_agent = (user_role == "agent") or (user_role_id == config.AGENT_ROLE_ID)
+        
+        # Generate a dummy password since we don't have the real one for local storage
+        # Actually, for telegram login, we might not need to store password credentials locally 
+        # if we trust the session or if we implement token-based local auth.
+        # But existing code uses storage.set_user_credentials(telegram_id, username, password)
+        # We can store a marker or just the username, but auto-login relies on it?
+        # Let's check main_menu.py: is_logged_in = await storage.is_user_logged_in(telegram_id)
+        # SQLiteStorage: checks if credentials exist.
+        # If we don't store password, is_logged_in might fail or we might need to change it.
+        # For now, let's store "TELEGRAM_LOGIN" as password.
+        
+        username = user_data.get("username") or user_data.get("email")
+        dummy_password = "TELEGRAM_LOGIN_SECURE"
+        
+        if is_admin:
+            # Store admin token and role
+            if access_token:
+                await storage.set_admin_token(telegram_id, access_token, "admin")
+            
+            await storage.set_user_credentials(telegram_id, username, dummy_password)
+            
+            await processing_msg.delete()
+            templates = TextTemplates(api_client, storage)
+            lang = await templates.get_user_language(telegram_id)
+            admin_success = await templates.get_template("admin_redirect_message", lang, "✅ Admin login successful!")
+            await message.answer(admin_success)
+            
+            from app.handlers.admin_menu import show_admin_menu
+            await show_admin_menu(message, state, api_client, storage)
+            return
+        
+        if is_agent:
+            if access_token:
+                await storage.set_admin_token(telegram_id, access_token, "agent")
+            
+            await storage.set_user_credentials(telegram_id, username, dummy_password)
+            
+            await processing_msg.delete()
+            templates = TextTemplates(api_client, storage)
+            lang = await templates.get_user_language(telegram_id)
+            agent_success = await templates.get_template("agent_redirect_message", lang, "✅ Agent login successful!")
+            await message.answer(agent_success)
+            
+            from app.handlers.agent_menu import show_agent_menu
+            await show_agent_menu(message, state, api_client, storage)
+            return
+            
+        # Regular player
+        # Get player profile to ensure we have playerUuid
+        player_response = await api_client.get_player_by_user_id(user_id)
+        player_uuid = player_response.player.playerUuid
+        
+        player_service = PlayerService(api_client, storage)
+        await player_service.storage.set_player_uuid(telegram_id, player_uuid)
+        
+        # Store credentials
+        await storage.set_user_credentials(telegram_id, username, dummy_password)
+        
+        await processing_msg.delete()
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        login_success = await templates.get_template("login_success", lang, "✅ Login/Registration successful!")
+        await message.answer(login_success)
+        
+        from app.handlers.main_menu import show_main_menu
+        await show_main_menu(message, state, api_client, storage)
+        
+    except Exception as e:
+        logger.error(f"❌ Telegram login error: {e}", exc_info=True)
+        await processing_msg.edit_text("❌ Login failed. Please try again or use email login.")
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        error_msg = await templates.get_template("error_generic", lang, "❌ An error occurred.")
+        await message.answer(error_msg)
 
 
 @router.callback_query(F.data == "auth:login")

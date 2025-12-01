@@ -18,10 +18,13 @@ from app.middlewares.error_handler import ErrorHandlerMiddleware, error_handler
 
 # Import handlers
 from app.handlers import start, main_menu, deposit_flow, withdraw_flow, history, inline_lists, callbacks, admin_menu, agent_menu
+from app.utils.filters import RoleFilter
 
 
 async def setup_handlers(dp: Dispatcher, api_client: APIClient, storage):
     """Register all handlers."""
+    # Configure global filters with storage dependency
+    RoleFilter.configure(storage)
     # Register routers
     # Register flow handlers (with state filters) FIRST so they have priority
     dp.include_router(start.router)  # Has LoginStates, RegistrationStates
@@ -31,9 +34,12 @@ async def setup_handlers(dp: Dispatcher, api_client: APIClient, storage):
     dp.include_router(inline_lists.router)
     dp.include_router(callbacks.router)
     # Register menu handlers AFTER flow handlers
-    dp.include_router(main_menu.router)
-    dp.include_router(agent_menu.router)  # Register before admin_menu
-    dp.include_router(admin_menu.router)
+    # IMPORTANT: Register admin/agent BEFORE main_menu so they check first
+    # Admin/agent handlers check role, if not their role, they return early (pass to next)
+    # Main menu processes last and handles regular players
+    dp.include_router(admin_menu.router)  # Register FIRST - checks for admin role
+    dp.include_router(agent_menu.router)  # Register SECOND - checks for agent role
+    dp.include_router(main_menu.router)  # Register LAST - handles regular players
 
 
 async def on_startup(bot: Bot, api_client: APIClient, storage):

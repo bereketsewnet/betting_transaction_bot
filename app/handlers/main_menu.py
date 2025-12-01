@@ -8,6 +8,7 @@ from app.services.api_client import APIClient
 from app.utils.keyboards import build_main_menu_keyboard
 from app.utils.text_templates import TextTemplates
 from app.storage import StorageInterface
+from app.utils.filters import RoleFilter
 
 logger = logging.getLogger(__name__)
 
@@ -87,18 +88,21 @@ async def cmd_main_menu(message_or_callback, state: FSMContext, api_client: APIC
         await show_main_menu(message, state, api_client, storage)
 
 
-@router.message(F.text)
+@router.message(RoleFilter(exclude={"admin", "agent"}), F.text)
 async def handle_menu_buttons(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Single handler for all menu button clicks - dispatches to correct function."""
     telegram_id = message.from_user.id
     text = message.text
     
+    logger.info(f"🔍 Main menu handler received: '{text}' from user {telegram_id}")
+    
     # Don't process if user is in a flow state (deposit, withdraw, login, registration)
     current_state = await state.get_state()
     if current_state and any(current_state.startswith(prefix) for prefix in ["DepositStates:", "WithdrawStates:", "LoginStates:", "RegistrationStates:", "AdminTransactionStates:", "AgentTransactionStates:"]):
+        logger.info(f"⏭️ Main menu skipping - user in flow state: {current_state}")
         return  # Let state-specific handlers process it
     
-    # Get user's language and button texts
+    # User is a player (filter ensures this), now check if text matches any player button
     templates = TextTemplates(api_client, storage)
     lang = await templates.get_user_language(telegram_id)
     
@@ -109,6 +113,8 @@ async def handle_menu_buttons(message: Message, state: FSMContext, api_client: A
     button_open_browser = await templates.get_template("button_open_browser", lang, "🌐 Open in Browser")
     button_help = await templates.get_template("button_help", lang, "ℹ️ Help")
     button_logout = await templates.get_template("button_logout", lang, "🚪 Logout")
+    
+    logger.info(f"✅ Main menu continuing - user role is player, text: '{text}'")
     
     # Dispatch based on button text
     if text in [button_deposit, "💵 Deposit"]:

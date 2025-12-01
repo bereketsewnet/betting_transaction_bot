@@ -263,6 +263,29 @@ class APIClient:
             logger.error(f"   Username: {username}")
             logger.error(f"   Password length: {len(password)}")
             raise
+
+    async def telegram_login(
+        self,
+        phone: str,
+        telegram_id: int,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        username: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Login or register via Telegram contact."""
+        payload = {
+            "phone": phone,
+            "telegramId": telegram_id,
+            "firstName": first_name,
+            "lastName": last_name,
+            "username": username,
+        }
+        logger.info(f"📱 Telegram login request for user {telegram_id} (phone: {phone})")
+        
+        response = await self._request("POST", "auth/telegram-login", json_data=payload)
+        result = response.json()
+        logger.info(f"✅ Telegram login success for user {telegram_id}")
+        return result
     
     async def logout(self) -> Dict[str, Any]:
         """Logout user."""
