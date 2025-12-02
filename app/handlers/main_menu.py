@@ -31,7 +31,8 @@ async def show_main_menu(message: Message, state: FSMContext, api_client: APICli
     
     # Build keyboard with translated buttons
     try:
-        keyboard = await build_main_menu_keyboard(show_logout=is_logged_in, player_uuid=player_uuid, templates=templates, lang=lang)
+        # Always show logout button as requested
+        keyboard = await build_main_menu_keyboard(show_logout=True, player_uuid=player_uuid, templates=templates, lang=lang)
         menu_title = await templates.get_template("main_menu_title", lang, "🏠 Main Menu\n\nSelect an option:")
         await message.answer(menu_title, reply_markup=keyboard)
     except Exception as e:
@@ -52,7 +53,8 @@ async def show_main_menu(message: Message, state: FSMContext, api_client: APICli
                 [KeyboardButton(text=button_deposit), KeyboardButton(text=button_withdraw)],
                 [KeyboardButton(text=button_history)],
                 [KeyboardButton(text=button_open_browser)],
-                [KeyboardButton(text=button_help), KeyboardButton(text=button_logout) if is_logged_in else KeyboardButton(text="")]
+                [KeyboardButton(text=button_help)],
+                [KeyboardButton(text=button_logout)]
             ],
             resize_keyboard=True
         )
@@ -121,17 +123,17 @@ async def handle_menu_buttons(message: Message, state: FSMContext, api_client: A
         logger.info(f"✅ Deposit button clicked by user {telegram_id}")
         from app.handlers.deposit_flow import start_deposit_flow
         await start_deposit_flow(message, state, api_client, storage)
-    
+
     elif text in [button_withdraw, "💸 Withdraw"]:
         logger.info(f"✅ Withdraw button clicked by user {telegram_id}")
         from app.handlers.withdraw_flow import start_withdraw_flow
         await start_withdraw_flow(message, state, api_client, storage)
-    
+
     elif text in [button_history, "📜 History"]:
         logger.info(f"✅ History button clicked by user {telegram_id}")
         from app.handlers.history import show_transaction_history
         await show_transaction_history(message, state, api_client, storage)
-    
+
     elif text in [button_open_browser, "🌐 Open in Browser"]:
         logger.info(f"✅ Open in Browser button clicked by user {telegram_id}")
         from app.services.player_service import PlayerService
@@ -173,7 +175,7 @@ Main features:
 
 For support, please contact the administrator.""")
         await message.answer(help_text)
-    
+
     elif text in [button_logout, "🚪 Logout", "/logout"]:
         logger.info(f"✅ Logout button clicked by user {telegram_id}")
         
@@ -206,3 +208,9 @@ For support, please contact the administrator.""")
         # Show start screen
         from app.handlers.start import cmd_start
         await cmd_start(message, state, api_client, storage)
+
+    else:
+        # Handle unknown command
+        logger.info(f"❓ Unknown command from user {telegram_id}: '{text}'")
+        unknown_cmd_msg = await templates.get_template("error_unknown_command", lang, "❌ Unknown command. Please select an option from the menu.")
+        await message.answer(unknown_cmd_msg)

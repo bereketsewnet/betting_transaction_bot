@@ -177,7 +177,7 @@ def build_amount_quick_replies() -> InlineKeyboardMarkup:
         if amount == "Custom":
             row.append(InlineKeyboardButton(text="✏️ Custom", callback_data="amount:custom"))
         else:
-            row.append(InlineKeyboardButton(text=f"${amount}", callback_data=f"amount:{amount}"))
+            row.append(InlineKeyboardButton(text=f"{amount} ETB", callback_data=f"amount:{amount}"))
         if len(row) >= 3:
             buttons.append(row)
             row = []

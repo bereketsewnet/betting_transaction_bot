@@ -113,6 +113,8 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
         # if welcome_text and welcome_text.strip():
         #     message_text = f"{welcome_text}\n\n{what_to_do}"
         # else:
+        #     message_text = what_to_do
+        
         message_text = what_to_do
         
         # Store language code in state to persist after login
