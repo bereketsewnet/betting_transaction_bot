@@ -10,6 +10,7 @@ from app.services.api_client import APIClient
 from app.storage import StorageInterface
 from app.utils.text_templates import TextTemplates
 from app.utils.filters import RoleFilter
+from aiogram.filters import StateFilter
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ async def show_agent_menu(message: Message, state: FSMContext, api_client: APICl
     await message.answer(agent_title, reply_markup=keyboard)
 
 
-@router.message(RoleFilter(include={"agent"}), F.text)
+@router.message(RoleFilter(include={"agent"}), F.text, ~StateFilter(AgentTransactionStates))
 async def handle_agent_menu_buttons(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Consolidated handler for all agent menu buttons."""
     telegram_id = message.from_user.id
@@ -374,6 +375,30 @@ async def show_transactions_by_date(message: Message, state: FSMContext, api_cli
         start_date = date_obj.strftime("%Y-%m-%d")
         end_date = (date_obj + timedelta(days=1)).strftime("%Y-%m-%d")
     except ValueError:
+        # Check if it's a menu command instead of a date
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        
+        button_my_tx = await templates.get_template("button_my_transactions", lang, "📋 My Transactions")
+        button_recent = await templates.get_template("button_recent_24h", lang, "🕐 Recent (24h)")
+        button_by_date = await templates.get_template("button_by_date", lang, "📅 By Date")
+        button_my_stats = await templates.get_template("button_my_stats", lang, "📊 My Stats")
+        button_open_browser = await templates.get_template("button_open_browser", lang, "🌐 Open in Browser")
+        button_logout = await templates.get_template("button_logout", lang, "🚪 Logout")
+        button_back = await templates.get_template("button_back", lang, "🔙 Back")
+        
+        # Check common buttons and potential localized versions
+        is_menu_command = (
+            date_str in [button_my_tx, button_recent, button_by_date, button_my_stats, button_open_browser, button_logout, button_back] or
+            date_str.startswith(("📋", "🕐", "📅", "📊", "🌐", "🚪", "🔙", "📱"))
+        )
+        
+        if is_menu_command:
+            logger.info(f"🔄 User sent menu command '{date_str}' while in date input mode. Switching context.")
+            await state.clear()
+            await handle_agent_menu_buttons(message, state, api_client, storage)
+            return
+
         await message.answer(
             "❌ Invalid date format. Please use YYYY-MM-DD format.\n"
             "Example: 2025-11-08"
@@ -389,26 +414,15 @@ async def show_transactions_by_date(message: Message, state: FSMContext, api_cli
     try:
         processing_msg = await message.answer("⏳ Fetching transactions...")
         
-        # Fetch all transactions and filter by date
+        # Use server-side filtering
         response = await api_client.get_agent_tasks(
             access_token=access_token,
             page=1,
-            limit=100,  # Get more transactions to filter
+            limit=50,
+            date_range=f"{start_date},{end_date}"
         )
         
-        transactions = response.get("tasks", []) or response.get("transactions", [])
-        
-        # Filter transactions by date
-        filtered_transactions = []
-        for tx in transactions:
-            tx_date_str = tx.get("createdAt")
-            if tx_date_str:
-                try:
-                    tx_date = datetime.fromisoformat(tx_date_str.replace("Z", "+00:00"))
-                    if start_date <= tx_date.strftime("%Y-%m-%d") < end_date:
-                        filtered_transactions.append(tx)
-                except:
-                    pass
+        filtered_transactions = response.get("tasks", []) or response.get("transactions", [])
         
         await processing_msg.delete()
         
@@ -759,6 +773,8 @@ async def update_status_confirm(callback: CallbackQuery, state: FSMContext, api_
                 [InlineKeyboardButton(text="🏠 Agent Menu", callback_data="agent:back")]
             ])
         )
+        # Clear state to allow other actions (like Reply Keyboard) to work
+        await state.set_state(None)
         
     except Exception as e:
         logger.error(f"Error updating status: {e}", exc_info=True)

@@ -12,7 +12,7 @@ from app.services.file_service import FileService
 from app.utils.keyboards import (
     build_paginated_inline_keyboard,
     build_amount_quick_replies,
-    build_confirmation_keyboard,
+    build_confirmation_keyboard_async,
     build_back_keyboard,
 )
 from app.utils.validators import validate_amount, validate_player_site_id, validate_callback_data
@@ -268,6 +268,11 @@ async def handle_screenshot_text(message: Message, state: FSMContext, api_client
     templates = TextTemplates(api_client, storage)
     lang = await templates.get_user_language(message.from_user.id)
     screenshot_msg = await templates.get_template("deposit_upload_screenshot", lang, "📎 Please send a photo attachment or type /skip to continue without attachment.")
+    
+    # Ensure the skip instruction is clear even if template doesn't have it (optional safety)
+    if "/skip" not in screenshot_msg and "skip" not in screenshot_msg.lower():
+         screenshot_msg += "\n\n(Type /skip to skip this step)"
+         
     await message.answer(screenshot_msg)
 
 
@@ -278,23 +283,44 @@ async def proceed_to_confirmation(message: Message, state: FSMContext, api_clien
     templates = TextTemplates(api_client, storage)
     lang = await templates.get_user_language(message.from_user.id)
     
-    confirm_template = await templates.get_template("deposit_confirm", lang, "Please confirm your deposit:")
-    summary = f"""
-📋 Transaction Summary
-
-Type: DEPOSIT
-Amount: ETB {data.get('amount', 0):.2f}
-Bank ID: {data.get('deposit_bank_id')}
-Betting Site ID: {data.get('betting_site_id')}
-Player Site ID: {data.get('player_site_id')}
-Screenshot: {'Yes' if data.get('screenshot_file_id') else 'No'}
-
-{confirm_template}
-    """
+    # Get names for ID-only fields
+    bank_name = data.get('bank', {}).get('bankName', f"ID: {data.get('deposit_bank_id')}")
     
-    keyboard = build_confirmation_keyboard()
+    # We need to fetch betting site name if not stored
+    site_name = f"ID: {data.get('betting_site_id')}"
+    if data.get('betting_site_id'):
+        try:
+            # Ideally we would cache this or store object in state, but for now fetch again or filter
+            # Since we don't have a direct get_betting_site(id) that returns name easily without full list or another call
+            # let's try to get it from active sites (likely cached by client or fast enough)
+            sites = await api_client.get_betting_sites(is_active=True)
+            site = next((s for s in sites if s.id == int(data.get('betting_site_id'))), None)
+            if site:
+                site_name = site.name
+        except Exception as e:
+            logger.warning(f"Failed to fetch site name for confirmation: {e}")
+
+    confirm_template = await templates.get_template("deposit_confirm", lang, "Please confirm your deposit:\n\nAmount: {currency} {amount}\nBank: {bank_name}\nBetting Site: {site_name}\nPlayer ID: {player_site_id}")
+    
+    # Format the template with variables
+    # Note: using locals() or explicit dict to match template placeholders
+    formatted_text = confirm_template.format(
+        currency="ETB",
+        amount=f"{data.get('amount', 0):.2f}",
+        bank_name=bank_name,
+        site_name=site_name,
+        player_site_id=data.get('player_site_id', 'N/A')
+    )
+    
+    # Add screenshot status if needed (though template might not have it, we can append it or rely on template)
+    # The user didn't ask for screenshot status in the template example, but the previous summary had it.
+    # If the template doesn't cover everything, we might need to adjust.
+    # User's example template: 
+    # እባክዎ የክፍያ አስገባትዎን ያረጋግጡ:\n\nመጠን: {currency} {amount}\nባንክ: {bank_name}\nየውርርድ ጣቢያ: {site_name}\nየተጫዋች መለያ: {player_site_id}
+    
+    keyboard = await build_confirmation_keyboard_async(templates, lang)
     await state.set_state(DepositStates.confirming)
-    await message.answer(summary, reply_markup=keyboard)
+    await message.answer(formatted_text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "confirm:yes", DepositStates.confirming)
@@ -349,10 +375,29 @@ async def confirm_deposit(callback: CallbackQuery, state: FSMContext, bot, api_c
         created_msg = await templates.get_template("transaction_created", lang, "✅ Your transaction has been created successfully!")
         processed_msg = await templates.get_template("transaction_processed", lang, "You will be notified when the transaction is processed.")
         
-        success_text = created_msg.replace("{transaction_uuid}", transaction.transaction.transactionUuid)
-        success_text += f"\n\nTransaction UUID: {transaction.transaction.transactionUuid}\n"
-        success_text += f"Status: {transaction.transaction.status}\n\n"
-        success_text += processed_msg
+        # Format messages using format() method to replace all placeholders
+        success_text = created_msg.format(
+            transaction_uuid=transaction.transaction.transactionUuid,
+            currency="ETB",
+            amount=f"{data['amount']:.2f}",
+            status=transaction.transaction.status
+        )
+        
+        # Don't append English fallback text if template is used
+        # success_text += f"\n\nTransaction UUID: {transaction.transaction.transactionUuid}\n"
+        # success_text += f"Status: {transaction.transaction.status}\n\n"
+        
+        # Add processed message (usually empty initially for deposits, but keeping for structure)
+        # Note: transaction_processed template usually has {transaction_uuid} and {status}
+        # If the template is intended for a later update, we might not want to show it now unless it's part of the initial success flow.
+        # Looking at the template content: '🎉 Your transaction has been processed!...' - This sounds like a completed state message.
+        # The seed file has 'transaction_created' which says 'You can check the status in your transaction history.'
+        # So 'transaction_processed' might be for updates.
+        # However, the previous code appended it. Let's assume we only need 'transaction_created' for now.
+        
+        # Actually, let's check if we should append anything else.
+        # The user complaint was about showing variables and mixed English.
+        # So we should rely PURELY on the formatted template.
         
         await callback.message.edit_text(success_text)
         

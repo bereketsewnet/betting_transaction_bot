@@ -13,7 +13,7 @@ from app.services.file_service import FileService
 from app.utils.keyboards import (
     build_paginated_inline_keyboard,
     build_amount_quick_replies,
-    build_confirmation_keyboard,
+    build_confirmation_keyboard_async,
     build_back_keyboard,
 )
 from app.utils.validators import validate_amount, validate_player_site_id
@@ -248,50 +248,72 @@ async def process_withdraw_player_site_id(message: Message, state: FSMContext):
 
 
 @router.message(WithdrawStates.uploading_screenshot, F.photo)
-async def process_withdraw_screenshot(message: Message, state: FSMContext):
+async def process_withdraw_screenshot(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Process screenshot upload."""
     photo: PhotoSize = message.photo[-1]
     await state.update_data(screenshot_file_id=photo.file_id)
-    await proceed_to_withdraw_confirmation(message, state)
+    await proceed_to_withdraw_confirmation(message, state, api_client, storage)
 
 
 @router.message(WithdrawStates.uploading_screenshot, F.text)
-async def handle_withdraw_screenshot_text(message: Message, state: FSMContext):
+async def handle_withdraw_screenshot_text(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Handle text input when photo is expected (including skip command)."""
     # Check if user wants to skip (accept /skip, skip, Skip, SKIP, etc.)
     if message.text and message.text.lower().strip().lstrip('/') == 'skip':
         logger.info(f"⏭️ User {message.from_user.id} skipping screenshot upload in withdrawal flow (text: '{message.text}')")
         await state.update_data(screenshot_file_id=None)
-        await proceed_to_withdraw_confirmation(message, state)
+        await proceed_to_withdraw_confirmation(message, state, api_client, storage)
         return
     
     # Not a skip command, ask for photo again
-    await message.answer(
-        "📎 Please send a photo attachment or type /skip to continue without attachment."
-    )
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
+    screenshot_msg = await templates.get_template("withdraw_upload_screenshot", lang, "📎 Please send a photo attachment or type /skip to continue without attachment.")
+    
+    # Ensure the skip instruction is clear even if template doesn't have it (optional safety)
+    if "/skip" not in screenshot_msg and "skip" not in screenshot_msg.lower():
+         screenshot_msg += "\n\n(Type /skip to skip this step)"
+
+    await message.answer(screenshot_msg)
 
 
-async def proceed_to_withdraw_confirmation(message: Message, state: FSMContext):
+async def proceed_to_withdraw_confirmation(message: Message, state: FSMContext, api_client: APIClient, storage: StorageInterface):
     """Proceed to confirmation step."""
     data = await state.get_data()
     
-    summary = f"""
-📋 Transaction Summary
-
-Type: WITHDRAW
-Amount: ETB {data.get('amount', 0):.2f}
-Bank ID: {data.get('withdrawal_bank_id')}
-Withdrawal Address: {data.get('withdrawal_address', 'N/A')}
-Betting Site ID: {data.get('betting_site_id')}
-Player Site ID: {data.get('player_site_id')}
-Screenshot: {'Yes' if data.get('screenshot_file_id') else 'No'}
-
-Please confirm to proceed:
-    """
+    templates = TextTemplates(api_client, storage)
+    lang = await templates.get_user_language(message.from_user.id)
     
-    keyboard = build_confirmation_keyboard()
+    # Get names for ID-only fields
+    bank_name = data.get('bank', {}).get('bankName', f"ID: {data.get('withdrawal_bank_id')}")
+    
+    # We need to fetch betting site name if not stored
+    site_name = f"ID: {data.get('betting_site_id')}"
+    if data.get('betting_site_id'):
+        try:
+            sites = await api_client.get_betting_sites(is_active=True)
+            site = next((s for s in sites if s.id == int(data.get('betting_site_id'))), None)
+            if site:
+                site_name = site.name
+        except Exception as e:
+            logger.warning(f"Failed to fetch site name for confirmation: {e}")
+
+    confirm_template = await templates.get_template("withdraw_confirm", lang, "Please confirm your withdrawal:\n\nAmount: {currency} {amount}\nBank: {bank_name}\nAddress: {address}\nBetting Site: {site_name}\nPlayer ID: {player_site_id}")
+    
+    # Format the template with variables
+    formatted_text = confirm_template.format(
+        currency="ETB",
+        amount=f"{data.get('amount', 0):.2f}",
+        bank_name=bank_name,
+        address=data.get('withdrawal_address', 'N/A'),
+        site_name=site_name,
+        player_site_id=data.get('player_site_id', 'N/A')
+    )
+    
+    keyboard = await build_confirmation_keyboard_async(templates, lang)
     await state.set_state(WithdrawStates.confirming)
-    await message.answer(summary, reply_markup=keyboard)
+    await message.answer(formatted_text, reply_markup=keyboard)
+
 
 
 @router.callback_query(F.data == "confirm:yes", WithdrawStates.confirming)
@@ -342,12 +364,24 @@ async def confirm_withdraw(callback: CallbackQuery, state: FSMContext, bot, api_
             await file_service.cleanup_file(screenshot_path)
         
         # Show success message
-        await callback.message.edit_text(
-            f"✅ Withdrawal transaction created successfully!\n\n"
-            f"Transaction UUID: {transaction.transaction.transactionUuid}\n"
-            f"Status: {transaction.transaction.status}\n\n"
-            f"You will be notified when the transaction is processed."
+        templates = TextTemplates(api_client, storage)
+        lang = await templates.get_user_language(telegram_id)
+        created_msg = await templates.get_template("transaction_created", lang, "✅ Your transaction has been created successfully!")
+        processed_msg = await templates.get_template("transaction_processed", lang, "You will be notified when the transaction is processed.")
+        
+        success_text = created_msg.format(
+            transaction_uuid=transaction.transaction.transactionUuid,
+            currency="ETB",
+            amount=f"{data['amount']:.2f}",
+            status=transaction.transaction.status
         )
+        
+        # Don't append English fallback or extra messages that might not be translated
+        # success_text += f"\n\nTransaction UUID: {transaction.transaction.transactionUuid}\n"
+        # success_text += f"Status: {transaction.transaction.status}\n\n"
+        # success_text += processed_msg
+        
+        await callback.message.edit_text(success_text)
         
         await state.clear()
         

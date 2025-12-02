@@ -187,12 +187,36 @@ def build_amount_quick_replies() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_confirmation_keyboard() -> InlineKeyboardMarkup:
+def build_confirmation_keyboard(templates=None, lang: str = "en") -> InlineKeyboardMarkup:
     """Build confirmation keyboard."""
+    # Default texts
+    text_confirm = "✅ Confirm"
+    text_cancel = "❌ Cancel"
+    
+    if templates:
+        # We can't use await here because this is synchronous.
+        # Ideally this should be async, but refactoring everything might be too much.
+        # However, templates.get_template is async.
+        # A workaround is to pass the texts directly, or change this to async.
+        # Let's change the signature to accept texts directly for simplicity in calling code
+        pass
+
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Confirm", callback_data="confirm:yes"),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="confirm:no"),
+            InlineKeyboardButton(text=text_confirm, callback_data="confirm:yes"),
+            InlineKeyboardButton(text=text_cancel, callback_data="confirm:no"),
+        ]
+    ])
+
+async def build_confirmation_keyboard_async(templates, lang: str = "en") -> InlineKeyboardMarkup:
+    """Build confirmation keyboard asynchronously."""
+    text_confirm = await templates.get_template("button_confirm", lang, "✅ Confirm")
+    text_cancel = await templates.get_template("button_cancel", lang, "❌ Cancel")
+    
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=text_confirm, callback_data="confirm:yes"),
+            InlineKeyboardButton(text=text_cancel, callback_data="confirm:no"),
         ]
     ])
 

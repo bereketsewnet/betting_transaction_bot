@@ -93,7 +93,7 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
         
         # Get templates with user's language
         templates = TextTemplates(api_client, storage)
-        welcome_text = await templates.get_welcome_message(language_code)
+        # welcome_text = await templates.get_welcome_message(language_code)
         
         # Get button texts from templates
         button_phone_login = await templates.get_template("button_phone_login", language_code, "📱 Login/Register")
@@ -110,21 +110,34 @@ async def select_language(callback: CallbackQuery, state: FSMContext, api_client
         keyboard = build_inline_keyboard(buttons, row_width=1)
         
         # Only show welcome text if it's not empty, otherwise just show the question
-        if welcome_text and welcome_text.strip():
-            message_text = f"{welcome_text}\n\n{what_to_do}"
-        else:
-            message_text = what_to_do
+        # if welcome_text and welcome_text.strip():
+        #     message_text = f"{welcome_text}\n\n{what_to_do}"
+        # else:
+        message_text = what_to_do
         
-        await callback.message.edit_text(
-            message_text,
-            reply_markup=keyboard
-        )
+        # Store language code in state to persist after login
+        await state.update_data(language_code=language_code)
+        
+        # Handle message edit with fallback
+        try:
+            await callback.message.edit_text(
+                message_text,
+                reply_markup=keyboard
+            )
+        except Exception:
+            # If edit fails (e.g. message too old or different type), send new message
+            try:
+                await callback.message.delete()
+            except:
+                pass
+            await callback.message.answer(message_text, reply_markup=keyboard)
+            
     except Exception as e:
         logger.error(f"Error in language selection: {e}", exc_info=True)
         templates = TextTemplates(api_client, storage)
         lang = await templates.get_user_language(telegram_id)
         error_msg = await templates.get_template("error_generic", lang, "❌ An error occurred. Please try again.")
-        await callback.message.edit_text(error_msg)
+        await callback.message.answer(error_msg) # Changed from edit_text to answer for safety
 
 
 @router.callback_query(F.data == "auth:guest")
@@ -304,12 +317,27 @@ async def process_contact(message: Message, state: FSMContext, api_client: APICl
         player_service = PlayerService(api_client, storage)
         await player_service.storage.set_player_uuid(telegram_id, player_uuid)
         
+        # Retrieve language code from state (preserved from select_language)
+        state_data = await state.get_data()
+        language_code = state_data.get("language_code")
+        
+        # If language code exists in state, ensure it's set for the user
+        if language_code:
+            logger.info(f"🌐 Updating language for user {telegram_id} to {language_code}")
+            await player_service.set_language(telegram_id, language_code)
+        
         # Store credentials
         await storage.set_user_credentials(telegram_id, username, dummy_password)
         
         await processing_msg.delete()
         templates = TextTemplates(api_client, storage)
+        
+        # Get language again to be sure (it should be what we just set)
         lang = await templates.get_user_language(telegram_id)
+        if language_code and lang != language_code:
+             logger.warning(f"⚠️ Language mismatch: storage has {lang}, expected {language_code}")
+             lang = language_code
+             
         login_success = await templates.get_template("login_success", lang, "✅ Login/Registration successful!")
         await message.answer(login_success)
         

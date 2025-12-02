@@ -475,6 +475,7 @@ class APIClient:
         status: Optional[str] = None,
         transaction_type: Optional[str] = None,
         agent_id: Optional[int] = None,
+        date_range: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get all transactions (admin only)."""
         headers = {"Authorization": f"Bearer {access_token}"}
@@ -485,6 +486,8 @@ class APIClient:
             params["type"] = transaction_type
         if agent_id:
             params["agent"] = agent_id
+        if date_range:
+            params["dateRange"] = date_range
         
         response = await self._request("GET", "admin/transactions", params=params, headers=headers)
         return response.json()
@@ -540,12 +543,15 @@ class APIClient:
         page: int = 1,
         limit: int = 20,
         status: Optional[str] = None,
+        date_range: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get assigned tasks for agent."""
         headers = {"Authorization": f"Bearer {access_token}"}
         params = {"page": page, "limit": limit}
         if status:
             params["status"] = status
+        if date_range:
+            params["dateRange"] = date_range
         
         response = await self._request("GET", "agent/tasks", params=params, headers=headers)
         return response.json()
